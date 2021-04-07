@@ -11,8 +11,8 @@ sp-runtime = { git = "https://github.com/paritytech/substrate", branch = "rococo
 sp-std = { git = "https://github.com/paritytech/substrate", branch = "rococo-v1", default-features = false }
 frame-support = { git = "https://github.com/paritytech/substrate", branch = "rococo-v1", default-features = false }
 frame-system = { git = "https://github.com/paritytech/substrate", branch = "rococo-v1", default-features = false }
-orml-traits = { git = "https://github.com/open-web3-stack/open-runtime-module-library", rev = "db10cfd", default-features = false }
-orml-tokens = { git = "https://github.com/open-web3-stack/open-runtime-module-library", rev = "db10cfd", default-features = false }
+orml-traits = { git = "https://github.com/open-web3-stack/open-runtime-module-library", version = "0.4.1-dev", default-features = false }
+orml-tokens = { git = "https://github.com/open-web3-stack/open-runtime-module-library", version = "0.4.1-dev", default-features = false }
 support = { package = "module-support", git = "https://github.com/AcalaNetwork/Acala", default-features = false }
 primitives = { package = "acala-primitives", git = "https://github.com/AcalaNetwork/Acala", default-features = false }
 
