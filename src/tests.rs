@@ -59,3 +59,37 @@ fn create_works() {
 		);
 	});
 }
+
+#[test]
+fn buy_works() {
+	ExtBuilder::default().build().execute_with(|| {
+		System::set_block_number(1);
+		System::reset_events();
+
+		assert_noop!(
+			Synthetics::buy(
+				Origin::signed(ALICE),
+				DOT,
+				2_000_000_000_000_000_000u128,
+				2_000_000_000_000_000_000u128
+			),
+			orml_tokens::Error::<Runtime>::BalanceTooLow
+		);
+
+		assert_noop!(
+			Synthetics::buy(Origin::signed(ALICE), DOT, 10u128, 1u128),
+			crate::Error::<Runtime>::NotEnoughIM
+		);
+
+		assert_ok!(Synthetics::buy(Origin::signed(ALICE), DOT, 10u128, 2u128));
+
+		assert_eq!(Synthetics::total_collateral_balance(), 2u128);
+		assert_eq!(Tokens::total_balance(KUSD, &ALICE), 999_999_999_999_999_998u128);
+		assert_eq!(Synthetics::collateral_balance_of(&DOT, &ALICE), 2u128);
+
+		assert_eq!(
+			last_event(),
+			Event::synthetics(crate::Event::LongBalanceUpdated(ALICE, 10i128))
+		);
+	});
+}
