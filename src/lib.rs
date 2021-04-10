@@ -147,9 +147,31 @@ pub mod module {
 
 		fn on_finalize(_n: T::BlockNumber) {}
 	}
-
+	
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
+		#[pallet::weight(1000)]
+		/// Tops up the collateral
+		/// - `origin`: account to be topped up
+		/// - `collateral`: amount of collateral to be topped up by
+		pub(super) fn top_up_collateral(
+			origin: OriginFor<T>,
+			collateral: Balance,
+		) -> DispatchResultWithPostInfo {
+			let who = ensure_signed(origin)?;
+
+			Margin::<T>::try_mutate(who.clone(), |account| -> DispatchResult {
+				*account = account.checked_add(collateral).ok_or(Error::<T>::Overflow)?;
+				
+				// Transfer the collateral to the module's account
+				T::Currency::transfer(T::NativeCurrencyId::get(), &who, &Self::account_id(), collateral)?;
+
+				Ok(())
+			})?;
+
+			Ok(().into())
+		}
+
 		#[pallet::weight(1000)]
 		/// Mints the payoff
 		/// - `origin`: the calling account

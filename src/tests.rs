@@ -28,6 +28,33 @@ fn last_event() -> Event {
 }
 
 #[test]
+fn top_up_collateral_works() {
+	ExtBuilder::default().build().execute_with(|| {
+		System::set_block_number(1);
+		System::reset_events();
+		PerpetualAsset::on_initialize(1);
+
+		assert_ok!(PerpetualAsset::mint(Origin::signed(ALICE), 100i128, 20u128));
+
+		assert_ok!(PerpetualAsset::top_up_collateral(Origin::signed(ALICE), 10u128));
+
+		assert_eq!(PerpetualAsset::total_collateral_balance(), 30u128);
+		assert_eq!(PerpetualAsset::margin(&ALICE), 30u128);
+
+		assert_noop!(
+			PerpetualAsset::top_up_collateral(
+				Origin::signed(ALICE),
+				2_000_000_000_000_000_000u128,
+			),
+			orml_tokens::Error::<Runtime>::BalanceTooLow,
+		);
+
+		assert_eq!(PerpetualAsset::total_collateral_balance(), 30u128);
+		assert_eq!(PerpetualAsset::margin(&ALICE), 30u128);
+	});
+}
+
+#[test]
 fn mint_works() {
 	ExtBuilder::default().build().execute_with(|| {
 		System::set_block_number(1);
@@ -48,6 +75,7 @@ fn mint_works() {
 			),
 			orml_tokens::Error::<Runtime>::BalanceTooLow
 		);
+		assert_eq!(PerpetualAsset::margin(&ALICE), 0u128);
 
 		assert_noop!(
 			PerpetualAsset::mint(Origin::signed(ALICE), 10i128, 1u128),
