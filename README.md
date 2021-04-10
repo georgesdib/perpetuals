@@ -33,10 +33,11 @@ Call *M* the total margin for a participant *A*, call *T* the total interest, an
 The needed collateral for maintaining the inventory is $B * P_0 * L$, if $B * P_0 * L > M$, then liquididate the inventory as per below.
 If $B * P_0 * L < M$, but $T * P_0 * L > M$ then close out part of the total interest such that:
 $$
-L * P_0 * T' = I \\
-T' > B
+I * P_0 * T' = M \\
+T' >= B
 $$
-If such $T'$ is possible, total interest becomes $T' = I / (L * P_0)$ and inventory remains at *B*. If no such $T'$ is possible, which would be the case if $B * P_0 * L > I$, then liquidate all the open interest, so total interest becomes $T' = B$, and inventory remains at *B*. This is done to make sure that if an opposing open interest comes during that block, it does not suffer from immediate liquidation.
+
+If such $T'$ is possible, total interest becomes $T' = M / (I * P_0)$ and inventory remains at *B*. If no such $T'$ is possible, which would be the case if $M / (I * P_0) < B$ or $M < B * I * P_0$, then liquidate all the open interest, so total interest becomes $T' = B$, and inventory remains at *B*. This is done to make sure that if an opposing open interest comes during that block, it does not suffer from immediate liquidation.
 
 ### Liquidation of inventory
 If $B * P_0 * L > M$, liquidate the full position, so total position and inventory goes to $0$, and M is returned back to the participant *A* (but only when *A* claims it). When this happens, we need to update the inventory of other participants, because we need that $\sum BI_i = \sum SI_i$. That happens once all the liquidation round has happened.

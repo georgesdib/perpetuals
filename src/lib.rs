@@ -23,6 +23,8 @@
 
 // TODO: add weight stuff, and benchmark it
 // TODO: allow any sort of payoff
+// TODO: make documentation better
+// TODO: clean up code
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(clippy::unused_unit)]
@@ -137,6 +139,7 @@ pub mod module {
 	impl<T: Config> Hooks<T::BlockNumber> for Pallet<T> {
 		fn on_initialize(_n: T::BlockNumber) -> Weight {
 			Self::update_margin();
+			Self::liquidate();
 			Self::match_interest();
 			// TODO what the hell is this??
 			10
@@ -192,6 +195,68 @@ pub mod module {
 }
 
 impl<T: Config> Pallet<T> {
+	/// Call *M* the total margin for a participant *A*,
+	/// Call *T* the total interest, and *B* the inventory (open interest is $T - B$)
+	/// The needed collateral for maintaining the inventory is $B * P_0 * L$
+	/// If $B * P_0 * L > M$, then liquididate the inventory as per below.
+	/// If $B * P_0 * L < M$, but $T * P_0 * L > M$ then close out part of the total interest such that:
+	/// $$
+	/// I * P_0 * T' = M \\
+	/// T' >= B
+	/// $$
+	/// If such $T'$ is possible, total interest becomes $T' = M / (I * P_0)$
+	/// and inventory remains at *B*. If no such $T'$ is possible
+	/// which would be the case if $M / (I * P_0) < B$ or $M < B * I * P_0$
+	/// then liquidate all the open interest, so total interest becomes $T' = B$
+	/// and inventory remains at *B*
+	/// This is done to make sure that if an opposing open interest comes during that block
+	/// it does not suffer from immediate liquidation.
+	/// 
+	/// ### Liquidation of inventory
+	/// If $B * P_0 * L > M$, liquidate the full position
+	/// so total position and inventory goes to $0$
+	fn liquidate() {
+		// TODO: add unittests
+		let price = Price0::<T>::get().unwrap(); // Price was already set so never panics
+		let liq_div = T::LiquidationDivider::get();
+		let im_div = T::InitialIMDivider::get();
+
+		for (account, margin) in Margin::<T>::iter() {
+			let inventory_signed = Self::inventory(account.clone());
+			let inventory = Self::balance_try_from_amount_abs(inventory_signed).unwrap(); // TODO handle overflow better
+			let balance = Self::balance_try_from_amount_abs(
+				Balances::<T>::get(account.clone())).unwrap(); // TODO handle overflow better
+
+			if (price.saturating_mul_int(balance) / liq_div) > margin {
+				// TODO check signage of inventory and balance, I am doing something wrong
+				// TODO: make sure no division by 0, but that should be obvious, maybe check at genesis
+				let a = price.saturating_mul_int(inventory);
+				let threshold = a / liq_div;
+				if threshold < margin {
+					let b = a / im_div;
+					if b > margin {
+						Balances::<T>::insert(account, inventory_signed);
+					} else {
+						let mut new_balance = price.saturating_div_int(im_div);
+						new_balance = margin / new_balance;
+						// TODO: handle overflow better
+						let mut n: Amount = Self::amount_try_from_balance(new_balance).unwrap();
+						if inventory_signed < 0 {
+							n *= -1;
+						}
+						Balances::<T>::insert(account, n);
+					}
+				} else {
+					Balances::<T>::insert(account.clone(), 0);
+					Inventory::<T>::insert(account, 0);
+				}
+			}
+		}
+	}
+
+	/// If $\forall i, X_i = 0$ then no interest to match. Otherwise, call $R = \frac{\sum_i Y_i}{\sum_i X_i}$
+	/// $B_i$ has bought $min(X_i, X_i * R)$
+	/// $S_i$ has sold $min(Y_i, Y_i / R)$
 	fn match_interest() {
 		// Reset inventory
 		Inventory::<T>::remove_all();
