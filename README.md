@@ -5,11 +5,11 @@ Platform for synthetic derivatives on Polkadot/Acala
 I will describe below the design proposal. I assume an asset AA.
 
 # Variables
-- L: Liquidation ratio
-- I: Initial IM ratio.
+* *L*: Liquidation ratio
+* *I*: Initial IM ratio.
 
 # Beginning of first block
-Store the price P_0 I get from Oracle.
+Store the price $$P_0$$ I get from **Oracle**.
 
 # Minting
 Buyer B_i expresses interest in buying quantity X_i. B_i wires I * X_i * P_0 in IM, and opens interest.
@@ -31,7 +31,7 @@ S_i margin balance is I * Y_i * P_0, long inventory of SI_i = min(Y_i, Y_i / R) 
 
 # Beginning of next block
 ## Price update
-Ask the oracle the price of the asset, call it P_1, store D = P_1 - P_0. Update the margin balances by the new price, and then check all margin balances and make sure the position is not in liquidation, if it is, liquidate as per below.
+Ask the **Oracle** the price of the asset, call it P_1, store D = P_1 - P_0. Update the margin balances by the new price, and then check all margin balances and make sure the position is not in liquidation, if it is, liquidate as per below.
 Store P_1 as P_0.
 
 ### Storage status
@@ -50,7 +50,7 @@ If such T' is possible, total interest becomes T' = I/(L*P_0) and inventory rema
 If B*P_0*L > M, liquidate the full position, so total position and inventory goes to 0, and M is returned back to the participant A. When this happens, we need to update the inventory of other participants, because we need that \sum BI_i = \sum SI_i. That happens once all the liquidation round has happened.
 
 ### Updating inventory upon liquidation
-We have X_i = BI_i + BO_i and Y_i = SI_i + BI_i. Run the "Interest Match" again, and get the new inventories and open interests. (TODO, rearrange the order, we can run the Interest Match algorithm only on Block Start and not on Block End).
+We have X_i = BI_i + BO_i and Y_i = SI_i + BI_i. Run the "Interest Match" again, and get the new inventories and open interests.
 
 # Redeeming
 If participant A tries to redeem R amount of their position. AO is the open interest and AI is the inventory. If AO > R, then AO becomes AO - R, and we are done.
@@ -65,5 +65,11 @@ A can claim any collateral back as long as the ratio I is maintained. Call:
 - L: The quantity X*P_0*I, which is the minimum collateral balance to maintain
 
 
-(1) If C < L, then return C back to A, and M becomes M - C.
-(2) If not, then return L, and M becomes M - L.
+1. If C < L, then return C back to A, and M becomes M - C.
+2. If not, then return L, and M becomes M - L.
+
+# TODO
+- [ ] Rearrange the order, we can run the Interest Match algorithm only on Block Start and not on Block End.
+- [ ] Add funding mechanism.
+- [ ] Add interest for collateral.
+- [ ] Format the document.
