@@ -14,82 +14,75 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-//! Unit tests for synthetics module.
+//! Unit tests for perpetualasset module.
 
 #![cfg(test)]
 
 use super::*;
 use frame_support::{assert_noop, assert_ok};
-use mock::{Event, ExtBuilder, Origin, Runtime, Synthetics, System, Tokens, ALICE, DOT, KUSD};
+use mock::{Event, ExtBuilder, Origin, Runtime, PerpetualAsset, System, Tokens, ALICE, BOB, KUSD};
 
 fn last_event() -> Event {
 	System::events().last().unwrap().event.clone()
 }
 
 #[test]
-fn create_works() {
+fn mint_works() {
 	ExtBuilder::default().build().execute_with(|| {
 		System::set_block_number(1);
 		System::reset_events();
 
 		assert_noop!(
-			Synthetics::create(
+			PerpetualAsset::mint(Origin::signed(ALICE), 10i128, 1u128),
+			crate::Error::<Runtime>::PriceNotSet
+		);
+
+		PerpetualAsset::on_initialize(1);
+
+		assert_noop!(
+			PerpetualAsset::mint(
 				Origin::signed(ALICE),
-				DOT,
-				2_000_000_000_000_000_000u128,
+				2_000_000_000_000_000_000i128,
 				2_000_000_000_000_000_000u128
 			),
 			orml_tokens::Error::<Runtime>::BalanceTooLow
 		);
 
 		assert_noop!(
-			Synthetics::create(Origin::signed(ALICE), DOT, 10u128, 1u128),
+			PerpetualAsset::mint(Origin::signed(ALICE), 10i128, 1u128),
 			crate::Error::<Runtime>::NotEnoughIM
 		);
 
-		assert_ok!(Synthetics::create(Origin::signed(ALICE), DOT, 10u128, 2u128));
-
-		assert_eq!(Synthetics::total_collateral_balance(), 2u128);
-		assert_eq!(Tokens::total_balance(KUSD, &ALICE), 999_999_999_999_999_998u128);
-		assert_eq!(Synthetics::collateral_balance_of(&DOT, &ALICE), 2u128);
+		assert_ok!(PerpetualAsset::mint(Origin::signed(ALICE), 100i128, 20u128));
 
 		assert_eq!(
 			last_event(),
-			Event::synthetics(crate::Event::ShortBalanceUpdated(ALICE, 10i128))
-		);
-	});
-}
-
-#[test]
-fn buy_works() {
-	ExtBuilder::default().build().execute_with(|| {
-		System::set_block_number(1);
-		System::reset_events();
-
-		assert_noop!(
-			Synthetics::buy(
-				Origin::signed(ALICE),
-				DOT,
-				2_000_000_000_000_000_000u128,
-				2_000_000_000_000_000_000u128
-			),
-			orml_tokens::Error::<Runtime>::BalanceTooLow
+			Event::perpetualasset(crate::Event::BalanceUpdated(ALICE, 100i128))
 		);
 
+		assert_eq!(PerpetualAsset::total_collateral_balance(), 20u128);
+		assert_eq!(Tokens::total_balance(KUSD, &ALICE), 999_999_999_999_999_980u128);
+		assert_eq!(PerpetualAsset::collateral_balance_of(&ALICE), 20u128);
+
+		assert_ok!(PerpetualAsset::mint(Origin::signed(ALICE), -10i128, 0u128)); // Removes balance so no IM needed
+		assert_eq!(PerpetualAsset::total_collateral_balance(), 20u128);
+		assert_eq!(PerpetualAsset::collateral_balance_of(&ALICE), 20u128);
+
+		assert_ok!(PerpetualAsset::mint(Origin::signed(ALICE), 20i128, 2u128)); // Only 10 unit added, so 2 IM needed
+		assert_eq!(PerpetualAsset::total_collateral_balance(), 22u128);
+		assert_eq!(PerpetualAsset::collateral_balance_of(&ALICE), 22u128);
+
+		// balance is now -200, so 40 IM needed, 22 already there, so need 18
 		assert_noop!(
-			Synthetics::buy(Origin::signed(ALICE), DOT, 10u128, 1u128),
+			PerpetualAsset::mint(Origin::signed(ALICE), -310i128, 17u128),
 			crate::Error::<Runtime>::NotEnoughIM
 		);
+		assert_ok!(PerpetualAsset::mint(Origin::signed(ALICE), -310i128, 18u128));
+		assert_eq!(PerpetualAsset::total_collateral_balance(), 40u128);
+		assert_eq!(PerpetualAsset::collateral_balance_of(&ALICE), 40u128);
 
-		assert_ok!(Synthetics::buy(Origin::signed(ALICE), DOT, 10u128, 2u128));
-
-		assert_eq!(Synthetics::total_collateral_balance(), 2u128);
-		assert_eq!(Tokens::total_balance(KUSD, &ALICE), 999_999_999_999_999_998u128);
-		assert_eq!(Synthetics::collateral_balance_of(&DOT, &ALICE), 2u128);
-
-		assert_eq!(
-			last_event(),
-			Event::synthetics(crate::Event::LongBalanceUpdated(ALICE, 10i128))
-		);
+		assert_ok!(PerpetualAsset::mint(Origin::signed(BOB), -100i128, 20u128));
+		assert_eq!(PerpetualAsset::total_collateral_balance(), 60u128);
+		assert_eq!(PerpetualAsset::collateral_balance_of(&BOB), 20u128);
 	});
 }

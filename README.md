@@ -19,16 +19,6 @@ Seller $S_i$ expresses interest in selling quantity $Y_i$. $S_i$ wires $I * SY_i
 $B_i$ margin balance is $I * X_i * P_0$, open interest of buying $X_i$
 $S_i$ margin balance is $I * Y_i * P_0$, open interest of selling $Y_i$
 
-# End of block
-## Interest match
-If $\forall i, X_i = 0$ then no interest to match. Otherwise, call $R = \frac{\sum_i Y_i}{\sum_i X_i}$
-$B_i$ has bought $min(X_i, X_i * R)$.
-$S_i$ has sold $min(Y_i, Y_i / R)$.
-
-### Storage status
-$B_i$ margin balance is $I * X_i * P_0$, long inventory of $BI_i = min(X_i, X_i * R)$ and open interest of $BO_i = X_i - min(X_i, X_i * R)$
-$S_i$ margin balance is $I * Y_i * P_0$, short inventory of $SI_i = min(Y_i, Y_i / R)$ and open interest of $SO_i = Y_i - min(Y_i, Y_i / R)$
-
 # Beginning of next block
 ## Price update
 Ask the **Oracle** the price of the asset, call it $P_1$, store $D = P_1 - P_0$. Update the margin balances by the new price, and then check all margin balances and make sure the position is not in liquidation, if it is, liquidate as per below.
@@ -49,10 +39,19 @@ $$
 If such $T'$ is possible, total interest becomes $T' = I / (L * P_0)$ and inventory remains at *B*. If no such $T'$ is possible, which would be the case if $B * P_0 * L > I$, then liquidate all the open interest, so total interest becomes $T' = B$, and inventory remains at *B*. This is done to make sure that if an opposing open interest comes during that block, it does not suffer from immediate liquidation.
 
 ### Liquidation of inventory
-If $B * P_0 * L > M$, liquidate the full position, so total position and inventory goes to $0$, and M is returned back to the participant *A*. When this happens, we need to update the inventory of other participants, because we need that $\sum BI_i = \sum SI_i$. That happens once all the liquidation round has happened.
+If $B * P_0 * L > M$, liquidate the full position, so total position and inventory goes to $0$, and M is returned back to the participant *A* (but only when *A* claims it). When this happens, we need to update the inventory of other participants, because we need that $\sum BI_i = \sum SI_i$. That happens once all the liquidation round has happened.
 
-### Updating inventory upon liquidation
-We have $X_i = BI_i + BO_i$ and $Y_i = SI_i + BI_i$. Run the "Interest Match" again, and get the new inventories and open interests.
+## Interest match
+If $\forall i, X_i = 0$ then no interest to match. Otherwise, call $R = \frac{\sum_i Y_i}{\sum_i X_i}$
+$B_i$ has bought $min(X_i, X_i * R)$.
+$S_i$ has sold $min(Y_i, Y_i / R)$.
+
+### Storage status
+$B_i$ margin balance is *M*, long inventory of $BI_i = min(X_i, X_i * R)$ and open interest of $BO_i = X_i - min(X_i, X_i * R)$
+$S_i$ margin balance is *M**, short inventory of $SI_i = min(Y_i, Y_i / R)$ and open interest of $SO_i = Y_i - min(Y_i, Y_i / R)$
+
+# Topping up collateral
+If participant *A* tops up their collaterl by *C*, simply increment their margin balance.
 
 # Redeeming
 If participant *A* tries to redeem *R* amount of their position. *AO* is the open interest and *AI* is the inventory. If $AO > R$, then *AO* becomes $AO - R$, and we are done.
@@ -64,7 +63,7 @@ A can claim any collateral back as long as the ratio *I* is maintained. Call:
 * *C*: Collateral being claimed back
 * *M*: Total margin associated with *A*
 * *X*: Total position of *A*
-* *L*: The quantity $X*P_0*I$, which is the minimum collateral balance to maintain
+* *L*: The quantity $X * P_0 * I$, which is the minimum collateral balance to maintain
 
 
 1. If $C < L$, then return *C* back to *A*, and *M* becomes $M - C$.

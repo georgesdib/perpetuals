@@ -14,13 +14,15 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-//! # Sythetics Module
+//! # PerpetualAsset Module
 //!
 //! ## Overview
 //!
-//! Price any synthetic payoff as long as oracle can provide a price
+//! Given an asset for which an Oracle can provide a price, give a way
+//! for longs and shorts to express their view
 
 // TODO: add weight stuff, and benchmark it
+// TODO: allow any sort of payoff
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(clippy::unused_unit)]
@@ -40,13 +42,8 @@ mod tests;
 pub use module::*;
 
 // TODO: take that from oracle
-fn get_price(_curreny: &CurrencyId) -> Price {
+fn get_price() -> Price {
 	1.into()
-}
-
-// TODO: take that from somewhere else
-fn get_collateral_divider(_currency: &CurrencyId) -> u128 {
-	5
 }
 
 #[frame_support::pallet]
@@ -59,6 +56,18 @@ pub mod module {
 		/// The synthetic's module id, keep all collaterals.
 		#[pallet::constant]
 		type ModuleId: Get<ModuleId>;
+
+		/// The asset to be priced
+		#[pallet::constant]
+		type CurrencyId: Get<CurrencyId>;
+
+		/// Initial IM Divider
+		#[pallet::constant]
+		type InitialIMDivider: Get<Balance>;
+
+		/// Liquidation Divider
+		#[pallet::constant]
+		type LiquidationDivider: Get<Balance>;
 
 		/// Currency for transfer currencies
 		type Currency: MultiCurrencyExtended<Self::AccountId, CurrencyId = CurrencyId, Balance = Balance>;
@@ -76,30 +85,30 @@ pub mod module {
 		AmountConvertFailed,
 		/// Overflow
 		Overflow,
+		/// Emitted when trying to redeem without enough balance
+		NotEnoughBalance,
+		/// Emitted when P0 not set
+		PriceNotSet,
 	}
 
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(crate) fn deposit_event)]
 	pub enum Event<T: Config> {
-		/// Emitted when collateral is updated by \[amount\]
-		CollateralUpdated(Amount),
-		/// Emitted when the short balance of \[T::AccountId\] is updated by
-		/// \[Amount\]
-		ShortBalanceUpdated(T::AccountId, Amount),
-		/// Emitted when the long balance of \[T::AccountId\] is updated by
-		/// \[Amount\]
-		LongBalanceUpdated(T::AccountId, Amount),
+		/// Emitted when collateral is updated by \[Balance\]
+		CollateralUpdated(Balance),
+		/// Emitted when the balance of \[T::AccountId\] is updated to \[Balance\]
+		BalanceUpdated(T::AccountId, Amount),
 	}
 
 	#[pallet::storage]
-	type Shorts<T: Config> = StorageMap<_, Twox128, (CurrencyId, T::AccountId), Balance, ValueQuery>;
-
-	#[pallet::storage]
-	type Longs<T: Config> = StorageMap<_, Twox128, (CurrencyId, T::AccountId), Balance, ValueQuery>;
+	pub(crate) type Balances<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, Amount, ValueQuery>;
 
 	#[pallet::storage]
 	#[pallet::getter(fn margin)]
-	pub(crate) type Margin<T: Config> = StorageMap<_, Twox128, (CurrencyId, T::AccountId), Balance, ValueQuery>;
+	pub(crate) type Margin<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, Balance, ValueQuery>;
+
+	#[pallet::storage]
+	pub(crate) type Price0<T: Config> = StorageValue<_, Price>;
 
 	#[pallet::genesis_config]
 	pub struct GenesisConfig {}
@@ -122,6 +131,8 @@ pub mod module {
 	#[pallet::hooks]
 	impl<T: Config> Hooks<T::BlockNumber> for Pallet<T> {
 		fn on_initialize(_n: T::BlockNumber) -> Weight {
+			Self::update_margin();
+			// TODO what the hell is this??
 			10
 		}
 
@@ -131,53 +142,43 @@ pub mod module {
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
 		#[pallet::weight(1000)]
-		/// Create a payoff (or append to existing)
+		/// Mints the payoff
 		/// - `origin`: the calling account
-		/// - `currency`: the asset to be priced
-		/// - `supply`: the amount of asset to be minted
+		/// - `amount`: the amount of asset to be minted(can be positive or negative)
 		/// - `collateral`: the amount of collateral in native currency
-		pub(super) fn create(
+		pub(super) fn mint(
 			origin: OriginFor<T>,
-			currency: CurrencyId,
-			supply: Balance,
+			amount: Amount,
 			collateral: Balance,
 		) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
 
-			let s = Self::amount_try_from_balance(supply)?;
-			let who_clone = who.clone();
+			let current_balance = Balances::<T>::try_get(who.clone()).unwrap_or(0.into());
+			let balance = current_balance.checked_add(amount).ok_or(Error::<T>::Overflow)?;
 
-			Self::transact(&who, &currency, &supply, &collateral)?;
+			// Check if enough collateral
+			let current_margin = Margin::<T>::try_get(who.clone()).unwrap_or(0u128.into());
+			let price = Price0::<T>::get().ok_or(Error::<T>::PriceNotSet)?;
+			let positive_balance = Self::balance_try_from_amount_abs(balance)?;
+			let total_price = price.checked_mul_int(positive_balance).ok_or(Error::<T>::Overflow)?;
+			let needed_im = total_price / Self::get_collateral_divider();
+			if current_margin + collateral < needed_im {
+				return Err(Error::<T>::NotEnoughIM.into());
+			}
 
-			// Update the shorts balances
-			Shorts::<T>::insert((currency, who), supply);
-			Self::deposit_event(Event::ShortBalanceUpdated(who_clone, s));
+			let module_account = Self::account_id();
 
-			Ok(().into())
-		}
+			if collateral > 0 {
+				// Transfer the collateral to the module's account
+				T::Currency::transfer(T::NativeCurrencyId::get(), &who, &module_account, collateral)?;
+				Margin::<T>::insert(who.clone(), current_margin + collateral);
+			}
 
-		#[pallet::weight(1000)]
-		/// Buys a payoff
-		/// - `origin`: the calling account
-		/// - `currency`: the asset to be priced
-		/// - `amount`: the amount of asset to be bought
-		/// - `collateral`: the amount of collateral in native currency
-		pub(super) fn buy(
-			origin: OriginFor<T>,
-			currency: CurrencyId,
-			amount: Balance,
-			collateral: Balance,
-		) -> DispatchResultWithPostInfo {
-			let who = ensure_signed(origin)?;
+			Self::deposit_event(Event::CollateralUpdated(collateral));
 
-			let s = Self::amount_try_from_balance(amount)?;
-			let who_clone = who.clone();
-
-			Self::transact(&who, &currency, &amount, &collateral)?;
-
-			// Update the longs balances
-			Longs::<T>::insert((currency, who), amount);
-			Self::deposit_event(Event::LongBalanceUpdated(who_clone, s));
+			// Update the balances
+			Balances::<T>::insert(who.clone(), balance);
+			Self::deposit_event(Event::BalanceUpdated(who, balance));
 
 			Ok(().into())
 		}
@@ -185,40 +186,30 @@ pub mod module {
 }
 
 impl<T: Config> Pallet<T> {
-	fn check_collateral(
-		currency: &CurrencyId,
-		quantity: &Balance,
-		collateral: &Balance,
-	) -> result::Result<(), Error<T>> {
-		let total_price = get_price(currency)
-			.checked_mul_int(*quantity)
-			.ok_or(Error::<T>::Overflow)?;
-		let needed_im = total_price / get_collateral_divider(currency);
-		if *collateral < needed_im {
-			return Err(Error::<T>::NotEnoughIM.into());
+	// TODO: add unittests
+	fn update_margin() {
+		let p1 = get_price();
+		let p0 = Price0::<T>::get().unwrap_or(p1);
+		let delta = p1 - p0;
+		Price0::<T>::set(Some(p1));
+		if !delta.is_zero() {
+			Margin::<T>::translate(|account, margin: Balance| -> Option<Balance> {
+				let bal = Balances::<T>::get(account); // This should never fail, TODO handle that
+				// TODO handle overflow better
+				let update_balance = delta.saturating_mul_int(bal);
+				// TODO handle better the failure here
+				let amount = Self::amount_try_from_balance(margin).unwrap(); // panic if this fails
+				let mut res = amount + update_balance;
+				if res < 0 {
+					res = 0; // No more margin left, account will be liquidated
+				}
+				Some(Self::balance_try_from_amount_abs(res).unwrap())
+			});
 		}
-		Ok(())
 	}
 
-	fn transact(
-		who: &T::AccountId,
-		currency: &CurrencyId,
-		amount: &Balance,
-		collateral: &Balance,
-	) -> DispatchResultWithPostInfo {
-		// Ensure enough collateral
-		Self::check_collateral(currency, amount, collateral)?;
-
-		let module_account = Self::account_id();
-		let col = Self::amount_try_from_balance(*collateral)?;
-		let who_clone = (*who).clone();
-
-		// Transfer the collateral to the module's account
-		T::Currency::transfer(T::NativeCurrencyId::get(), who, &module_account, *collateral)?;
-		Margin::<T>::insert((*currency, who_clone), *collateral);
-		Self::deposit_event(Event::CollateralUpdated(col));
-
-		Ok(().into())
+	fn get_collateral_divider() -> Balance {
+		T::InitialIMDivider::get()
 	}
 
 	fn account_id() -> T::AccountId {
@@ -230,10 +221,9 @@ impl<T: Config> Pallet<T> {
 		T::Currency::total_balance(T::NativeCurrencyId::get(), &Self::account_id())
 	}
 
-	/// Gets the collateral balance of collateral of \[AccountId\] in
-	/// \[CurrencyId\]
-	pub fn collateral_balance_of(currency: &CurrencyId, who: &T::AccountId) -> Balance {
-		Self::margin((currency, who))
+	/// Gets the collateral balance of collateral of \[AccountId\]
+	pub fn collateral_balance_of(who: &T::AccountId) -> Balance {
+		Self::margin(who)
 	}
 
 	/// Convert `Balance` to `Amount`.
@@ -242,7 +232,7 @@ impl<T: Config> Pallet<T> {
 	}
 
 	/// Convert the absolute value of `Amount` to `Balance`.
-	fn _balance_try_from_amount_abs(a: Amount) -> result::Result<Balance, Error<T>> {
+	fn balance_try_from_amount_abs(a: Amount) -> result::Result<Balance, Error<T>> {
 		TryInto::<Balance>::try_into(a.saturating_abs()).map_err(|_| Error::<T>::AmountConvertFailed)
 	}
 }

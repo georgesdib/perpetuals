@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-//! Mocks for synthetics module.
+//! Mocks for perpetualasset module.
 
 #![cfg(test)]
 
@@ -33,14 +33,17 @@ pub const BOB: AccountId = 2;
 pub const KUSD: CurrencyId = CurrencyId::Token(TokenSymbol::KUSD);
 pub const DOT: CurrencyId = CurrencyId::Token(TokenSymbol::DOT);
 
-mod synthetics {
+mod perpetualasset {
 	pub use super::super::*;
 }
 
 parameter_types!(
 	pub const BlockHashCount: BlockNumber = 250;
-	pub const SyntheticsModuleId: ModuleId = ModuleId(*b"aca/synm");
+	pub const PerpetualAssetModuleId: ModuleId = ModuleId(*b"aca/pasm");
 	pub const NativeCurrencyId: CurrencyId = KUSD;
+	pub const UsedCurrencyId: CurrencyId = DOT;
+	pub const InitialIMDivider: Balance = 5u128;
+	pub const LiquidationDivider: Balance = 10u128;
 );
 
 impl frame_system::Config for Runtime {
@@ -86,11 +89,14 @@ impl orml_tokens::Config for Runtime {
 	type OnDust = ();
 }
 
-impl synthetics::Config for Runtime {
+impl perpetualasset::Config for Runtime {
 	type Event = Event;
-	type ModuleId = SyntheticsModuleId;
+	type ModuleId = PerpetualAssetModuleId;
 	type Currency = Tokens;
 	type NativeCurrencyId = NativeCurrencyId;
+	type CurrencyId = UsedCurrencyId;
+	type InitialIMDivider = InitialIMDivider;
+	type LiquidationDivider = LiquidationDivider;
 }
 
 type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Runtime>;
@@ -103,7 +109,7 @@ construct_runtime!(
 		UncheckedExtrinsic = UncheckedExtrinsic
 	{
 		System: frame_system::{Pallet, Call, Event<T>},
-		Synthetics: synthetics::{Pallet, Call, Event<T>, Config, Storage},
+		PerpetualAsset: perpetualasset::{Pallet, Call, Event<T>, Config, Storage},
 		Tokens: orml_tokens::{Pallet, Storage, Event<T>, Config<T>},
 	}
 );
@@ -135,7 +141,7 @@ impl ExtBuilder {
 		.assimilate_storage(&mut t)
 		.unwrap();
 
-		synthetics::GenesisConfig::default()
+		perpetualasset::GenesisConfig::default()
 			.assimilate_storage::<Runtime>(&mut t)
 			.unwrap();
 
