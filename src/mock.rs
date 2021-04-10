@@ -30,6 +30,8 @@ pub type AccountId = u128;
 
 pub const ALICE: AccountId = 1;
 pub const BOB: AccountId = 2;
+pub const CHARLIE: AccountId = 3;
+pub const GEORGES: AccountId = 4;
 pub const KUSD: CurrencyId = CurrencyId::Token(TokenSymbol::KUSD);
 pub const DOT: CurrencyId = CurrencyId::Token(TokenSymbol::DOT);
 
@@ -124,6 +126,8 @@ impl Default for ExtBuilder {
 			endowed_accounts: vec![
 				(ALICE, KUSD, 1_000_000_000_000_000_000u128),
 				(BOB, KUSD, 1_000_000_000_000_000_000u128),
+				(CHARLIE, KUSD, 1_000_000_000_000_000_000u128),
+				(GEORGES, KUSD, 1_000_000_000_000_000_000u128),
 			],
 		}
 	}

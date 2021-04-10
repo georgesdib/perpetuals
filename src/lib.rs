@@ -33,6 +33,7 @@ use frame_system::pallet_prelude::*;
 use orml_traits::{MultiCurrency, MultiCurrencyExtended};
 use primitives::{Amount, Balance, CurrencyId};
 use sp_runtime::{traits::AccountIdConversion, FixedPointNumber, ModuleId};
+use sp_arithmetic::Perquintill;
 use sp_std::{convert::TryInto, result};
 use support::Price;
 
@@ -104,6 +105,10 @@ pub mod module {
 	pub(crate) type Balances<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, Amount, ValueQuery>;
 
 	#[pallet::storage]
+	#[pallet::getter(fn inventory)]
+	pub(crate) type Inventory<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, Amount, ValueQuery>;
+
+	#[pallet::storage]
 	#[pallet::getter(fn margin)]
 	pub(crate) type Margin<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, Balance, ValueQuery>;
 
@@ -132,6 +137,7 @@ pub mod module {
 	impl<T: Config> Hooks<T::BlockNumber> for Pallet<T> {
 		fn on_initialize(_n: T::BlockNumber) -> Weight {
 			Self::update_margin();
+			Self::match_interest();
 			// TODO what the hell is this??
 			10
 		}
@@ -161,7 +167,7 @@ pub mod module {
 			let price = Price0::<T>::get().ok_or(Error::<T>::PriceNotSet)?;
 			let positive_balance = Self::balance_try_from_amount_abs(balance)?;
 			let total_price = price.checked_mul_int(positive_balance).ok_or(Error::<T>::Overflow)?;
-			let needed_im = total_price / Self::get_collateral_divider();
+			let needed_im = total_price / T::InitialIMDivider::get();
 			if current_margin + collateral < needed_im {
 				return Err(Error::<T>::NotEnoughIM.into());
 			}
@@ -186,6 +192,46 @@ pub mod module {
 }
 
 impl<T: Config> Pallet<T> {
+	fn match_interest() {
+		// Reset inventory
+		Inventory::<T>::remove_all();
+		let mut shorts: Balance = 0u128;
+		let mut longs: Balance = 0u128;
+		for balance in Balances::<T>::iter_values() {
+			let b = Self::balance_try_from_amount_abs(balance).unwrap(); // Panics if error
+			if balance < 0 {
+				shorts += b;
+			} else {
+				longs += b;
+			}
+		}
+
+		// If one of them is 0, nothing to match
+		if shorts != 0 && longs != 0 {
+			let ratio;
+			let shorts_filled;
+			if shorts < longs {
+				ratio = Perquintill::from_rational(shorts, longs);
+				shorts_filled = true;
+			} else {
+				ratio = Perquintill::from_rational(longs, shorts);
+				shorts_filled = false;
+			}
+			for (account, balance) in Balances::<T>::iter() {
+				let mut amount: Amount;
+				if (balance < 0 && shorts_filled) || (balance >= 0 && !shorts_filled) {
+					amount = balance;
+				} else {
+					let b = Self::balance_try_from_amount_abs(balance).unwrap(); // Panics if error
+					amount = Self::amount_try_from_balance(ratio.mul_floor(b)).unwrap(); // Should never fail given we know no overflow
+					if balance < 0 {
+						amount *= -1;
+					}
+				}
+				Inventory::<T>::insert(account, amount);
+			}
+		}
+	}
 	// TODO: add unittests
 	fn update_margin() {
 		let p1 = get_price();
@@ -208,10 +254,6 @@ impl<T: Config> Pallet<T> {
 		}
 	}
 
-	fn get_collateral_divider() -> Balance {
-		T::InitialIMDivider::get()
-	}
-
 	fn account_id() -> T::AccountId {
 		T::ModuleId::get().into_account()
 	}
@@ -219,11 +261,6 @@ impl<T: Config> Pallet<T> {
 	/// Gets the total balance of collateral in NativeCurrency
 	pub fn total_collateral_balance() -> Balance {
 		T::Currency::total_balance(T::NativeCurrencyId::get(), &Self::account_id())
-	}
-
-	/// Gets the collateral balance of collateral of \[AccountId\]
-	pub fn collateral_balance_of(who: &T::AccountId) -> Balance {
-		Self::margin(who)
 	}
 
 	/// Convert `Balance` to `Amount`.
