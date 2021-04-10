@@ -9,7 +9,7 @@ I will describe below the design proposal. I assume an asset AA.
 * *I*: Initial IM ratio.
 
 # Beginning of first block
-Store the price $$P_0$$ I get from **Oracle**.
+Store the price $P_0$ I get from **Oracle**.
 
 # Minting
 Buyer B_i expresses interest in buying quantity X_i. B_i wires I * X_i * P_0 in IM, and opens interest.
