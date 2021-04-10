@@ -1,19 +1,69 @@
 # PolkaSynthetics
 Platform for synthetic derivatives on Polkadot/Acala
 
+# How it works
+I will describe below the design proposal. I assume an asset AA.
+
+# Variables
+- L: Liquidation ratio
+- I: Initial IM ratio.
+
+# Beginning of first block
+Store the price P_0 I get from Oracle.
+
 # Minting
-Buyer A expresses interest in buying W of asset AA.
-A wires 20% in IM, and opens interest.
-Buyer B expresses interest in buying X of asset AA, wires IM as well.
-Seller C expresses interest in selling Y of asset AA.
-C wires 20% in IM, and opens interest.
-Seller D expresses interest in selling Z of asset AA, wires IM as well.
+Buyer B_i expresses interest in buying quantity X_i. B_i wires I * X_i * P_0 in IM, and opens interest.
+Seller S_i expresses interest in selling quantity Y_i. S_i wires I * SY_i * P_0 in IM, and opens interest.
+
+### Storage status
+B_i margin balance is I * X_i * P_0, open interest of buying X_i
+S_i margin balance is I * Y_i * P_0, open interest of selling Y_i
 
 # End of block
 ## Interest match
-If X = W = 0 then no interest to match.
-Call P = (Z+Y) / (X+W)
-A has bought min(W, W * P).
-B has bought min(X, X * P).
-C has sold min(Y, Y / P).
-D has sold min(Z, Z / P).
+If \forall i, X_i = 0 then no interest to match. Otherwise, call R = \sum_i Y_i / \sum_i X_i
+B_i has bought min(X_i, X_i * R).
+S_i has sold min(Y_i, Y_i / R).
+
+### Storage status
+B_i margin balance is I * X_i * P_0, long inventory of BI_i = min(X_i, X_i * R) and open interest of BO_i = X_i - min(X_i, X_i * R)
+S_i margin balance is I * Y_i * P_0, long inventory of SI_i = min(Y_i, Y_i / R) and open interest of SO_i = Y_i - min(Y_i, Y_i / R)
+
+# Beginning of next block
+## Price update
+Ask the oracle the price of the asset, call it P_1, store D = P_1 - P_0. Update the margin balances by the new price, and then check all margin balances and make sure the position is not in liquidation, if it is, liquidate as per below.
+Store P_1 as P_0.
+
+### Storage status
+B_i margin balance is I * X_i * P_0 + BI_i * D, long inventory of BI_i and open interest of BO_i
+S_i margin balance is I * Y_i * P_0 - SI_i * D, long inventory of SI_i and open interest of SO_i
+
+## Liquidation
+Call M the total margin for a participant A, call T the total interest, and B the inventory (open interest is T - B).
+The needed collateral for maintaining the inventory is B * P_0 * L, if B * P_0 * L > M, then liquididate the inventory as per below.
+If B*P_0*L < M, but T*P_0*L > M then close out part of the total interest such that:
+(1) L*P_0*T' = I
+(2) T' > B
+If such T' is possible, total interest becomes T' = I/(L*P_0) and inventory remains at B. If no such T' is possible, which would be the case if B*P_0*L > I, then liquidate all the open interest, so total interest becomes T' = B, and inventory remains at B. This is done to make sure that if an opposing open interest comes during that block, it does not suffer from immediate liquidation.
+
+### Liquidation of inventory
+If B*P_0*L > M, liquidate the full position, so total position and inventory goes to 0, and M is returned back to the participant A. When this happens, we need to update the inventory of other participants, because we need that \sum BI_i = \sum SI_i. That happens once all the liquidation round has happened.
+
+### Updating inventory upon liquidation
+We have X_i = BI_i + BO_i and Y_i = SI_i + BI_i. Run the "Interest Match" again, and get the new inventories and open interests. (TODO, rearrange the order, we can run the Interest Match algorithm only on Block Start and not on Block End).
+
+# Redeeming
+If participant A tries to redeem R amount of their position. AO is the open interest and AI is the inventory. If AO > R, then AO becomes AO - R, and we are done.
+If AO < R, then AO becomes 0, and then AI becomes AI + AO - R. If AI is now 0, return the M associated with A in full to A.
+
+# Claiming collateral back
+Note this can be combined with the Redeeming step.
+A can claim any collateral back as long as the ratio I is maintained. Call:
+- C: Collateral being claimed back
+- M: Total margin associated with A
+- X: Total position of A
+- L: The quantity X*P_0*I, which is the minimum collateral balance to maintain
+
+
+(1) If C < L, then return C back to A, and M becomes M - C.
+(2) If not, then return L, and M becomes M - L.
