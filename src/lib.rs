@@ -45,11 +45,6 @@ mod tests;
 
 pub use module::*;
 
-// TODO: take that from oracle
-fn get_price() -> Price {
-	1.into()
-}
-
 #[frame_support::pallet]
 pub mod module {
 	use super::*;
@@ -116,7 +111,7 @@ pub mod module {
 
 	#[pallet::storage]
 	#[pallet::getter(fn margin)]
-	pub(crate) type Margin<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, Balance, ValueQuery>;
+	pub(crate) type Margin<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, Amount, ValueQuery>;
 
 	#[pallet::storage]
 	pub(crate) type Price0<T: Config> = StorageValue<_, Price>;
@@ -142,7 +137,8 @@ pub mod module {
 	#[pallet::hooks]
 	impl<T: Config> Hooks<T::BlockNumber> for Pallet<T> {
 		fn on_initialize(_n: T::BlockNumber) -> Weight {
-			Self::update_margin();
+			// TODO: Get price from Oracle
+			Self::update_margin(&1.into());
 			Self::liquidate();
 			Self::match_interest();
 			// TODO what the hell is this??
@@ -171,7 +167,7 @@ pub mod module {
 			let positive_collateral = Self::balance_try_from_amount_abs(collateral)?;
 
 			// Check if enough collateral
-			let current_margin = Self::amount_try_from_balance(Margin::<T>::try_get(who.clone()).unwrap_or(0u128.into()))?;
+			let current_margin = Margin::<T>::try_get(who.clone()).unwrap_or(0i128.into());
 			let price = Price0::<T>::get().ok_or(Error::<T>::PriceNotSet)?;
 			let positive_balance = Self::balance_try_from_amount_abs(balance)?;
 			let total_price = price.checked_mul_int(positive_balance).ok_or(Error::<T>::Overflow)?;
@@ -181,8 +177,6 @@ pub mod module {
 				return Err(Error::<T>::NotEnoughIM.into());
 			}
 
-			let positive_margin = Self::balance_try_from_amount_abs(new_margin)?;
-
 			let module_account = Self::account_id();
 
 			if collateral > 0 {
@@ -191,12 +185,12 @@ pub mod module {
 			}
 
 			if collateral < 0 {
-				// Transfer the collateral to the module's account
+				// Transfer the collateral from the module's account
 				T::Currency::transfer(T::NativeCurrencyId::get(), &module_account, &who, positive_collateral)?;
 			}
 
 			if collateral != 0 {
-				Margin::<T>::insert(who.clone(), positive_margin);
+				Margin::<T>::insert(who.clone(), new_margin);
 				Self::deposit_event(Event::CollateralUpdated(collateral));
 			}
 
@@ -242,28 +236,35 @@ impl<T: Config> Pallet<T> {
 			let balance = Self::balance_try_from_amount_abs(
 				Balances::<T>::get(account.clone())).unwrap(); // TODO handle overflow better
 
-			if (price.saturating_mul_int(balance) / liq_div) > margin {
-				// TODO check signage of inventory and balance, I am doing something wrong
-				// TODO: make sure no division by 0, but that should be obvious, maybe check at genesis
-				let a = price.saturating_mul_int(inventory);
-				let threshold = a / liq_div;
-				if threshold < margin {
-					let b = a / im_div;
-					if b > margin {
-						Balances::<T>::insert(account, inventory_signed);
-					} else {
-						let mut new_balance = price.saturating_div_int(im_div);
-						new_balance = margin / new_balance;
-						// TODO: handle overflow better
-						let mut n: Amount = Self::amount_try_from_balance(new_balance).unwrap();
-						if inventory_signed < 0 {
-							n *= -1;
+			if margin <= 0 { // No Collateral left, liquidate
+				Balances::<T>::insert(account.clone(), 0);
+				Inventory::<T>::insert(account, 0);
+			} else {
+
+				let positive_margin = Self::balance_try_from_amount_abs(margin).unwrap(); // TODO panics if error
+
+				if (price.saturating_mul_int(balance) / liq_div) > positive_margin {
+					// TODO: make sure no division by 0, but that should be obvious, maybe check at genesis
+					let a = price.saturating_mul_int(inventory);
+					let threshold = a / liq_div;
+					if threshold < positive_margin {
+						let b = a / im_div;
+						if b > positive_margin {
+							Balances::<T>::insert(account, inventory_signed);
+						} else {
+							let mut new_balance = price.saturating_div_int(im_div);
+							new_balance = positive_margin / new_balance;
+							// TODO: handle overflow better
+							let mut n: Amount = Self::amount_try_from_balance(new_balance).unwrap();
+							if inventory_signed < 0 {
+								n *= -1;
+							}
+							Balances::<T>::insert(account, n);
 						}
-						Balances::<T>::insert(account, n);
+					} else {
+						Balances::<T>::insert(account.clone(), 0);
+						Inventory::<T>::insert(account, 0);
 					}
-				} else {
-					Balances::<T>::insert(account.clone(), 0);
-					Inventory::<T>::insert(account, 0);
 				}
 			}
 		}
@@ -312,24 +313,16 @@ impl<T: Config> Pallet<T> {
 			}
 		}
 	}
-	// TODO: add unittests
-	fn update_margin() {
-		let p1 = get_price();
-		let p0 = Price0::<T>::get().unwrap_or(p1);
-		let delta = p1 - p0;
-		Price0::<T>::set(Some(p1));
+
+	fn update_margin(new_price: &Price) {
+		let p0 = Price0::<T>::get().unwrap_or(*new_price);
+		let delta = *new_price - p0;
+		Price0::<T>::set(Some(*new_price));
 		if !delta.is_zero() {
-			Margin::<T>::translate(|account, margin: Balance| -> Option<Balance> {
-				let bal = Balances::<T>::get(account); // This should never fail, TODO handle that
-				// TODO handle overflow better
-				let update_balance = delta.saturating_mul_int(bal);
-				// TODO handle better the failure here
-				let amount = Self::amount_try_from_balance(margin).unwrap(); // panic if this fails
-				let mut res = amount + update_balance;
-				if res < 0 {
-					res = 0; // No more margin left, account will be liquidated
-				}
-				Some(Self::balance_try_from_amount_abs(res).unwrap())
+			Margin::<T>::translate(|account, margin: Amount| -> Option<Amount> {
+				let bal = Balances::<T>::get(account);
+				let update_balance = delta.checked_mul_int(bal)?;
+				Some(margin + update_balance)
 			});
 		}
 	}
