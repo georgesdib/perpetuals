@@ -21,8 +21,7 @@ $S_i$ margin balance is $I * Y_i * P_0$, open interest of selling $Y_i$
 
 # Beginning of next block
 ## Price update
-Ask the **Oracle** the price of the asset, call it $P_1$, store $D = P_1 - P_0$. Update the margin balances by the new price, and then check all margin balances and make sure the position is not in liquidation, if it is, liquidate as per below.
-Store $P_1$ as $P_0$.
+Ask the **Oracle** the price of the asset, call it $P_1$, store $D = P_1 - P_0$. Update the margin balances by the new price, only the inventory should be impacted by this and not the open interest. Store $P_1$ as $P_0$.
 
 ### Storage status
 $B_i$ margin balance is $I * X_i * P_0 + BI_i * D$, long inventory of $BI_i$ and open interest of $BO_i$

@@ -39,7 +39,7 @@ fn top_up_collateral_works() {
 		assert_ok!(PerpetualAsset::mint(Origin::signed(ALICE), 0i128, 10i128));
 
 		assert_eq!(PerpetualAsset::total_collateral_balance(), 30u128);
-		assert_eq!(PerpetualAsset::margin(&ALICE), 30i128);
+		assert_eq!(PerpetualAsset::margin(&ALICE), 30u128);
 
 		assert_noop!(
 			PerpetualAsset::mint(
@@ -51,7 +51,7 @@ fn top_up_collateral_works() {
 		);
 
 		assert_eq!(PerpetualAsset::total_collateral_balance(), 30u128);
-		assert_eq!(PerpetualAsset::margin(&ALICE), 30i128);
+		assert_eq!(PerpetualAsset::margin(&ALICE), 30u128);
 	});
 }
 
@@ -76,7 +76,7 @@ fn mint_works() {
 			),
 			orml_tokens::Error::<Runtime>::BalanceTooLow
 		);
-		assert_eq!(PerpetualAsset::margin(&ALICE), 0i128);
+		assert_eq!(PerpetualAsset::margin(&ALICE), 0u128);
 
 		assert_noop!(
 			PerpetualAsset::mint(Origin::signed(ALICE), 10i128, 1i128),
@@ -92,16 +92,16 @@ fn mint_works() {
 
 		assert_eq!(PerpetualAsset::total_collateral_balance(), 20u128);
 		assert_eq!(Tokens::total_balance(KUSD, &ALICE), 999_999_999_999_999_980u128);
-		assert_eq!(PerpetualAsset::margin(&ALICE), 20i128);
+		assert_eq!(PerpetualAsset::margin(&ALICE), 20u128);
 
 		assert_ok!(PerpetualAsset::mint(Origin::signed(ALICE), -10i128, 0i128)); // Removes balance so no IM needed
 		assert_eq!(PerpetualAsset::total_collateral_balance(), 20u128);
-		assert_eq!(PerpetualAsset::margin(&ALICE), 20i128);
+		assert_eq!(PerpetualAsset::margin(&ALICE), 20u128);
 		assert_eq!(PerpetualAsset::balances(&ALICE), 90i128);
 
 		assert_ok!(PerpetualAsset::mint(Origin::signed(ALICE), 20i128, 2i128)); // Only 10 unit added, so 2 IM needed
 		assert_eq!(PerpetualAsset::total_collateral_balance(), 22u128);
-		assert_eq!(PerpetualAsset::margin(&ALICE), 22i128);
+		assert_eq!(PerpetualAsset::margin(&ALICE), 22u128);
 
 		// balance is now -200, so 40 IM needed, 22 already there, so need 18
 		assert_noop!(
@@ -110,11 +110,11 @@ fn mint_works() {
 		);
 		assert_ok!(PerpetualAsset::mint(Origin::signed(ALICE), -310i128, 18i128));
 		assert_eq!(PerpetualAsset::total_collateral_balance(), 40u128);
-		assert_eq!(PerpetualAsset::margin(&ALICE), 40i128);
+		assert_eq!(PerpetualAsset::margin(&ALICE), 40u128);
 
 		assert_ok!(PerpetualAsset::mint(Origin::signed(BOB), -100i128, 20i128));
 		assert_eq!(PerpetualAsset::total_collateral_balance(), 60u128);
-		assert_eq!(PerpetualAsset::margin(&BOB), 20i128);
+		assert_eq!(PerpetualAsset::margin(&BOB), 20u128);
 	});
 }
 
@@ -163,7 +163,7 @@ fn redeem_works() {
 
 		assert_ok!(PerpetualAsset::mint(Origin::signed(ALICE), 100i128, 20i128));
 		assert_eq!(PerpetualAsset::total_collateral_balance(), 20u128);
-		assert_eq!(PerpetualAsset::margin(&ALICE), 20i128);
+		assert_eq!(PerpetualAsset::margin(&ALICE), 20u128);
 		assert_eq!(PerpetualAsset::balances(&ALICE), 100i128);
 
 		assert_noop!(
@@ -172,22 +172,22 @@ fn redeem_works() {
 		);
 
 		assert_eq!(PerpetualAsset::total_collateral_balance(), 20u128);
-		assert_eq!(PerpetualAsset::margin(&ALICE), 20i128);
+		assert_eq!(PerpetualAsset::margin(&ALICE), 20u128);
 		assert_eq!(PerpetualAsset::balances(&ALICE), 100i128);
 
 		assert_ok!(PerpetualAsset::mint(Origin::signed(ALICE), 100i128, 60i128));
 		assert_eq!(PerpetualAsset::total_collateral_balance(), 80u128);
-		assert_eq!(PerpetualAsset::margin(&ALICE), 80i128);
+		assert_eq!(PerpetualAsset::margin(&ALICE), 80u128);
 		assert_eq!(PerpetualAsset::balances(&ALICE), 200i128);
 
 		assert_ok!(PerpetualAsset::mint(Origin::signed(ALICE), 100i128, -10i128));
 		assert_eq!(PerpetualAsset::total_collateral_balance(), 70u128);
-		assert_eq!(PerpetualAsset::margin(&ALICE), 70i128);
+		assert_eq!(PerpetualAsset::margin(&ALICE), 70u128);
 		assert_eq!(PerpetualAsset::balances(&ALICE), 300i128);
 
 		assert_ok!(PerpetualAsset::mint(Origin::signed(ALICE), 100i128, 10i128));
 		assert_eq!(PerpetualAsset::total_collateral_balance(), 80u128);
-		assert_eq!(PerpetualAsset::margin(&ALICE), 80i128);
+		assert_eq!(PerpetualAsset::margin(&ALICE), 80u128);
 		assert_eq!(PerpetualAsset::balances(&ALICE), 400i128);
 
 		assert_ok!(PerpetualAsset::mint(Origin::signed(ALICE), 0i128, 10i128));
@@ -197,6 +197,176 @@ fn redeem_works() {
 			PerpetualAsset::mint(Origin::signed(ALICE), 100i128, 10i128),
 			crate::Error::<Runtime>::NotEnoughIM
 		);
+	});
+}
+
+#[test]
+fn liquidate_works() {
+	ExtBuilder::default().build().execute_with(|| {
+		System::set_block_number(1);
+		System::reset_events();
+		PerpetualAsset::on_initialize(1);
+
+		assert_ok!(PerpetualAsset::mint(Origin::signed(ALICE), 100i128, 20i128));
+		assert_ok!(PerpetualAsset::mint(Origin::signed(BOB), -100i128, 20i128));
+		assert_ok!(PerpetualAsset::mint(Origin::signed(CHARLIE), 50i128, 20i128));
+		assert_ok!(PerpetualAsset::mint(Origin::signed(GEORGES), -10i128, 20i128));
+		PerpetualAsset::on_initialize(2);
+
+		assert_eq!(PerpetualAsset::inventory(&ALICE), 73i128);
+		assert_eq!(PerpetualAsset::inventory(&BOB), -100i128);
+		assert_eq!(PerpetualAsset::inventory(&CHARLIE), 36i128);
+		assert_eq!(PerpetualAsset::inventory(&GEORGES), -10i128);
+		assert_eq!(PerpetualAsset::balances(&ALICE), 100i128);
+		assert_eq!(PerpetualAsset::balances(&BOB), -100i128);
+		assert_eq!(PerpetualAsset::balances(&CHARLIE), 50i128);
+		assert_eq!(PerpetualAsset::balances(&GEORGES), -10i128);
+
+		PerpetualAsset::update_margin(&2.into());
+
+		assert_eq!(PerpetualAsset::total_collateral_balance(), 80u128);
+		assert_eq!(PerpetualAsset::margin(&ALICE), 93u128);
+		assert_eq!(PerpetualAsset::margin(&BOB), 0u128);
+		assert_eq!(PerpetualAsset::margin(&CHARLIE), 56u128);
+		assert_eq!(PerpetualAsset::margin(&GEORGES), 10u128);
+
+		PerpetualAsset::liquidate();
+
+		assert_eq!(PerpetualAsset::inventory(&ALICE), 73i128);
+		assert_eq!(PerpetualAsset::inventory(&BOB), 0i128);
+		assert_eq!(PerpetualAsset::inventory(&CHARLIE), 36i128);
+		assert_eq!(PerpetualAsset::inventory(&GEORGES), -10i128);
+		assert_eq!(PerpetualAsset::balances(&ALICE), 100i128);
+		assert_eq!(PerpetualAsset::balances(&BOB), 0i128);
+		assert_eq!(PerpetualAsset::balances(&CHARLIE), 50i128);
+		assert_eq!(PerpetualAsset::balances(&GEORGES), -10i128);
+
+		PerpetualAsset::match_interest();
+
+		assert_eq!(PerpetualAsset::inventory(&ALICE), 6i128);
+		assert_eq!(PerpetualAsset::inventory(&BOB), 0i128);
+		assert_eq!(PerpetualAsset::inventory(&CHARLIE), 3i128);
+		assert_eq!(PerpetualAsset::inventory(&GEORGES), -10i128);
+		assert_eq!(PerpetualAsset::balances(&ALICE), 100i128);
+		assert_eq!(PerpetualAsset::balances(&BOB), 0i128);
+		assert_eq!(PerpetualAsset::balances(&CHARLIE), 50i128);
+		assert_eq!(PerpetualAsset::balances(&GEORGES), -10i128);
+	});
+}
+
+#[test]
+fn liquidate_works_complex_2() {
+	ExtBuilder::default().build().execute_with(|| {
+		System::set_block_number(1);
+		System::reset_events();
+		PerpetualAsset::update_margin(&20u128.into());
+
+		assert_ok!(PerpetualAsset::mint(Origin::signed(ALICE), 100i128, 400i128));
+		assert_ok!(PerpetualAsset::mint(Origin::signed(BOB), -100i128, 400i128));
+		assert_ok!(PerpetualAsset::mint(Origin::signed(CHARLIE), 100i128, 4000i128));
+		assert_ok!(PerpetualAsset::mint(Origin::signed(GEORGES), 100i128, 4000i128));
+		PerpetualAsset::match_interest();
+
+		assert_eq!(PerpetualAsset::inventory(&ALICE), 33i128);
+		assert_eq!(PerpetualAsset::inventory(&BOB), -100i128);
+		assert_eq!(PerpetualAsset::inventory(&CHARLIE), 33i128);
+		assert_eq!(PerpetualAsset::inventory(&GEORGES), 33i128);
+		assert_eq!(PerpetualAsset::balances(&ALICE), 100i128);
+		assert_eq!(PerpetualAsset::balances(&BOB), -100i128);
+		assert_eq!(PerpetualAsset::balances(&CHARLIE), 100i128);
+		assert_eq!(PerpetualAsset::balances(&GEORGES), 100i128);
+
+		// liquidate all of Alice's open interest
+		PerpetualAsset::update_margin(&9u128.into());
+		PerpetualAsset::liquidate();
+		assert_eq!(PerpetualAsset::total_collateral_balance(), 8800u128);
+		assert_eq!(PerpetualAsset::margin(&ALICE), 37u128);
+		assert_eq!(PerpetualAsset::margin(&BOB), 1500u128);
+		assert_eq!(PerpetualAsset::margin(&CHARLIE), 3637u128);
+		assert_eq!(PerpetualAsset::margin(&GEORGES), 3637u128);
+
+		assert_eq!(PerpetualAsset::inventory(&ALICE), 33i128);
+		assert_eq!(PerpetualAsset::inventory(&BOB), -100i128);
+		assert_eq!(PerpetualAsset::inventory(&CHARLIE), 33i128);
+		assert_eq!(PerpetualAsset::inventory(&GEORGES), 33i128);
+		assert_eq!(PerpetualAsset::balances(&ALICE), 33);
+		assert_eq!(PerpetualAsset::balances(&BOB), -100i128);
+		assert_eq!(PerpetualAsset::balances(&CHARLIE), 100i128);
+		assert_eq!(PerpetualAsset::balances(&GEORGES), 100i128);
+
+		PerpetualAsset::match_interest();
+		assert_eq!(PerpetualAsset::inventory(&ALICE), 14i128);
+		assert_eq!(PerpetualAsset::inventory(&BOB), -100i128);
+		assert_eq!(PerpetualAsset::inventory(&CHARLIE), 42i128);
+		assert_eq!(PerpetualAsset::inventory(&GEORGES), 42i128);
+		assert_eq!(PerpetualAsset::balances(&ALICE), 33);
+		assert_eq!(PerpetualAsset::balances(&BOB), -100i128);
+		assert_eq!(PerpetualAsset::balances(&CHARLIE), 100i128);
+		assert_eq!(PerpetualAsset::balances(&GEORGES), 100i128);
+	});
+}
+
+#[test]
+fn liquidate_works_complex() {
+	ExtBuilder::default().build().execute_with(|| {
+		System::set_block_number(1);
+		System::reset_events();
+		PerpetualAsset::update_margin(&20u128.into());
+
+		assert_ok!(PerpetualAsset::mint(Origin::signed(ALICE), 100i128, 450i128));
+		assert_ok!(PerpetualAsset::mint(Origin::signed(BOB), -100i128, 400i128));
+		assert_ok!(PerpetualAsset::mint(Origin::signed(CHARLIE), 50i128, 400i128));
+		assert_ok!(PerpetualAsset::mint(Origin::signed(GEORGES), -10i128, 400i128));
+		PerpetualAsset::match_interest();
+
+		assert_eq!(PerpetualAsset::inventory(&ALICE), 73i128);
+		assert_eq!(PerpetualAsset::inventory(&BOB), -100i128);
+		assert_eq!(PerpetualAsset::inventory(&CHARLIE), 36i128);
+		assert_eq!(PerpetualAsset::inventory(&GEORGES), -10i128);
+		assert_eq!(PerpetualAsset::balances(&ALICE), 100i128);
+		assert_eq!(PerpetualAsset::balances(&BOB), -100i128);
+		assert_eq!(PerpetualAsset::balances(&CHARLIE), 50i128);
+		assert_eq!(PerpetualAsset::balances(&GEORGES), -10i128);
+
+		// No liquidation
+		PerpetualAsset::update_margin(&19u128.into());
+		PerpetualAsset::liquidate();
+		assert_eq!(PerpetualAsset::inventory(&ALICE), 73i128);
+		assert_eq!(PerpetualAsset::inventory(&BOB), -100i128);
+		assert_eq!(PerpetualAsset::inventory(&CHARLIE), 36i128);
+		assert_eq!(PerpetualAsset::inventory(&GEORGES), -10i128);
+		assert_eq!(PerpetualAsset::balances(&ALICE), 100i128);
+		assert_eq!(PerpetualAsset::balances(&BOB), -100i128);
+		assert_eq!(PerpetualAsset::balances(&CHARLIE), 50i128);
+		assert_eq!(PerpetualAsset::balances(&GEORGES), -10i128);
+
+		// liquidate Alice's open interest only
+		PerpetualAsset::update_margin(&16u128.into());
+		PerpetualAsset::liquidate();
+		assert_eq!(PerpetualAsset::total_collateral_balance(), 1650u128);
+		assert_eq!(PerpetualAsset::margin(&ALICE), 158u128);
+		assert_eq!(PerpetualAsset::margin(&BOB), 800u128);
+		assert_eq!(PerpetualAsset::margin(&CHARLIE), 256u128);
+		assert_eq!(PerpetualAsset::margin(&GEORGES), 440u128);
+
+		assert_eq!(PerpetualAsset::inventory(&ALICE), 73i128);
+		assert_eq!(PerpetualAsset::inventory(&BOB), -100i128);
+		assert_eq!(PerpetualAsset::inventory(&CHARLIE), 36i128);
+		assert_eq!(PerpetualAsset::inventory(&GEORGES), -10i128);
+		assert_eq!(PerpetualAsset::balances(&ALICE), 73i128);
+		assert_eq!(PerpetualAsset::balances(&BOB), -100i128);
+		assert_eq!(PerpetualAsset::balances(&CHARLIE), 50i128);
+		assert_eq!(PerpetualAsset::balances(&GEORGES), -10i128);
+
+		PerpetualAsset::match_interest();
+		assert_eq!(PerpetualAsset::inventory(&ALICE), 65i128);
+		assert_eq!(PerpetualAsset::inventory(&BOB), -100i128);
+		assert_eq!(PerpetualAsset::inventory(&CHARLIE), 44i128);
+		assert_eq!(PerpetualAsset::inventory(&GEORGES), -10i128);
+		assert_eq!(PerpetualAsset::balances(&ALICE), 73i128);
+		assert_eq!(PerpetualAsset::balances(&BOB), -100i128);
+		assert_eq!(PerpetualAsset::balances(&CHARLIE), 50i128);
+		assert_eq!(PerpetualAsset::balances(&GEORGES), -10i128);
 	});
 }
 
@@ -215,13 +385,22 @@ fn update_balances_works() {
 
 		PerpetualAsset::update_margin(&2.into());
 
+		assert_eq!(PerpetualAsset::inventory(&ALICE), 73i128);
+		assert_eq!(PerpetualAsset::inventory(&BOB), -100i128);
+		assert_eq!(PerpetualAsset::inventory(&CHARLIE), 36i128);
+		assert_eq!(PerpetualAsset::inventory(&GEORGES), -10i128);
+		assert_eq!(PerpetualAsset::balances(&ALICE), 100i128);
+		assert_eq!(PerpetualAsset::balances(&BOB), -100i128);
+		assert_eq!(PerpetualAsset::balances(&CHARLIE), 50i128);
+		assert_eq!(PerpetualAsset::balances(&GEORGES), -10i128);
+
 		assert_eq!(PerpetualAsset::total_collateral_balance(), 80u128);
-		assert_eq!(PerpetualAsset::margin(&ALICE), 120i128);
-		assert_eq!(PerpetualAsset::margin(&BOB), -80i128);
-		assert_eq!(PerpetualAsset::margin(&CHARLIE), 70i128);
-		assert_eq!(PerpetualAsset::margin(&GEORGES), 10i128);
+		assert_eq!(PerpetualAsset::margin(&ALICE), 93u128);
+		assert_eq!(PerpetualAsset::margin(&BOB), 0u128);
+		assert_eq!(PerpetualAsset::margin(&CHARLIE), 56u128);
+		assert_eq!(PerpetualAsset::margin(&GEORGES), 10u128);
 
 		assert_ok!(PerpetualAsset::mint(Origin::signed(BOB), 0i128, 120i128));
-		assert_eq!(PerpetualAsset::margin(&BOB), 40i128);
+		assert_eq!(PerpetualAsset::margin(&BOB), 120u128);
 	});
 }
