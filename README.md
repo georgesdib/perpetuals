@@ -43,35 +43,14 @@ If such $T'$ is possible, total interest becomes $T' = M / (I * P_0)$ and invent
 If $B * P_0 * L > M$, liquidate the full position, so total position and inventory goes to $0$, and M is returned back to the participant *A* (but only when *A* claims it). When this happens, we need to update the inventory of other participants, because we need that $\sum BI_i = \sum SI_i$. That happens once all the liquidation round has happened.
 
 ## Interest match
-If $\forall i, X_i = 0$ then no interest to match. Otherwise, call $R = \frac{\sum_i Y_i}{\sum_i X_i}$
-$B_i$ has bought $min(X_i, X_i * R)$.
-$S_i$ has sold $min(Y_i, Y_i / R)$.
+If $\forall i, X_i = 0$ then no interest to match. Otherwise, call $R = \frac{\sum_i Y_i}{\sum_i X_i}$. $B_i$ has bought $min(X_i, X_i * R)$. $S_i$ has sold $min(Y_i, Y_i / R)$.
 
 ### Storage status
 $B_i$ margin balance is *M*, long inventory of $BI_i = min(X_i, X_i * R)$ and open interest of $BO_i = X_i - min(X_i, X_i * R)$
 $S_i$ margin balance is *M**, short inventory of $SI_i = min(Y_i, Y_i / R)$ and open interest of $SO_i = Y_i - min(Y_i, Y_i / R)$
 
-# Topping up collateral
-If participant *A* tops up their collaterl by *C*, simply increment their margin balance.
-
-# Redeeming
-If participant *A* tries to redeem *R* amount of their position. *AO* is the open interest and *AI* is the inventory. If $AO > R$, then *AO* becomes $AO - R$, and we are done.
-If $AO < R$, then *AO* becomes $0$, and then *AI* becomes $AI + AO - R$. If *AI* is now $0$, return the *M* associated with *A* in full to *A*.
-
-# Claiming collateral back
-Note this can be combined with the Redeeming step.
-A can claim any collateral back as long as the ratio *I* is maintained. Call:
-* *C*: Collateral being claimed back
-* *M*: Total margin associated with *A*
-* *X*: Total position of *A*
-* *L*: The quantity $X * P_0 * I$, which is the minimum collateral balance to maintain
-
-
-1. If $C < L$, then return *C* back to *A*, and *M* becomes $M - C$.
-2. If not, then return *L*, and *M* becomes $M - L$.
-
 # TODO
-- [ ] Rearrange the order, we can run the Interest Match algorithm only on Block Start and not on Block End.
+- [X] Rearrange the order, we can run the Interest Match algorithm only on Block Start and not on Block End.
 - [ ] Add funding mechanism.
 - [ ] Add interest for collateral.
 - [ ] Format the document.

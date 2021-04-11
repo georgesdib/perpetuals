@@ -25,6 +25,7 @@
 // TODO: allow any sort of payoff
 // TODO: make documentation better
 // TODO: clean up code
+// TODO: check redeeming and the updating of inventory
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(clippy::unused_unit)]
@@ -92,18 +93,21 @@ pub mod module {
 		NotEnoughBalance,
 		/// Emitted when P0 not set
 		PriceNotSet,
+		/// Emitted when claiming the wrong sign, ie buy vs sell
+		WrongSign,
 	}
 
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(crate) fn deposit_event)]
 	pub enum Event<T: Config> {
-		/// Emitted when collateral is updated by \[Balance\]
-		CollateralUpdated(Balance),
+		/// Emitted when collateral is updated by \[Amount\]
+		CollateralUpdated(Amount),
 		/// Emitted when the balance of \[T::AccountId\] is updated to \[Balance\]
 		BalanceUpdated(T::AccountId, Amount),
 	}
 
 	#[pallet::storage]
+	#[pallet::getter(fn balances)]
 	pub(crate) type Balances<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, Amount, ValueQuery>;
 
 	#[pallet::storage]
@@ -151,28 +155,6 @@ pub mod module {
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
 		#[pallet::weight(1000)]
-		/// Tops up the collateral
-		/// - `origin`: account to be topped up
-		/// - `collateral`: amount of collateral to be topped up by
-		pub(super) fn top_up_collateral(
-			origin: OriginFor<T>,
-			collateral: Balance,
-		) -> DispatchResultWithPostInfo {
-			let who = ensure_signed(origin)?;
-
-			Margin::<T>::try_mutate(who.clone(), |account| -> DispatchResult {
-				*account = account.checked_add(collateral).ok_or(Error::<T>::Overflow)?;
-				
-				// Transfer the collateral to the module's account
-				T::Currency::transfer(T::NativeCurrencyId::get(), &who, &Self::account_id(), collateral)?;
-
-				Ok(())
-			})?;
-
-			Ok(().into())
-		}
-
-		#[pallet::weight(1000)]
 		/// Mints the payoff
 		/// - `origin`: the calling account
 		/// - `amount`: the amount of asset to be minted(can be positive or negative)
@@ -180,32 +162,43 @@ pub mod module {
 		pub(super) fn mint(
 			origin: OriginFor<T>,
 			amount: Amount,
-			collateral: Balance,
+			collateral: Amount,
 		) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
 
 			let current_balance = Balances::<T>::try_get(who.clone()).unwrap_or(0.into());
 			let balance = current_balance.checked_add(amount).ok_or(Error::<T>::Overflow)?;
+			let positive_collateral = Self::balance_try_from_amount_abs(collateral)?;
 
 			// Check if enough collateral
-			let current_margin = Margin::<T>::try_get(who.clone()).unwrap_or(0u128.into());
+			let current_margin = Self::amount_try_from_balance(Margin::<T>::try_get(who.clone()).unwrap_or(0u128.into()))?;
 			let price = Price0::<T>::get().ok_or(Error::<T>::PriceNotSet)?;
 			let positive_balance = Self::balance_try_from_amount_abs(balance)?;
 			let total_price = price.checked_mul_int(positive_balance).ok_or(Error::<T>::Overflow)?;
-			let needed_im = total_price / T::InitialIMDivider::get();
-			if current_margin + collateral < needed_im {
+			let needed_im = Self::amount_try_from_balance(total_price / T::InitialIMDivider::get())?;
+			let new_margin = current_margin.checked_add(collateral).ok_or(Error::<T>::Overflow)?;
+			if new_margin < needed_im {
 				return Err(Error::<T>::NotEnoughIM.into());
 			}
+
+			let positive_margin = Self::balance_try_from_amount_abs(new_margin)?;
 
 			let module_account = Self::account_id();
 
 			if collateral > 0 {
 				// Transfer the collateral to the module's account
-				T::Currency::transfer(T::NativeCurrencyId::get(), &who, &module_account, collateral)?;
-				Margin::<T>::insert(who.clone(), current_margin + collateral);
+				T::Currency::transfer(T::NativeCurrencyId::get(), &who, &module_account, positive_collateral)?;
 			}
 
-			Self::deposit_event(Event::CollateralUpdated(collateral));
+			if collateral < 0 {
+				// Transfer the collateral to the module's account
+				T::Currency::transfer(T::NativeCurrencyId::get(), &module_account, &who, positive_collateral)?;
+			}
+
+			if collateral != 0 {
+				Margin::<T>::insert(who.clone(), positive_margin);
+				Self::deposit_event(Event::CollateralUpdated(collateral));
+			}
 
 			// Update the balances
 			Balances::<T>::insert(who.clone(), balance);
