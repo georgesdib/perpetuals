@@ -1,8 +1,13 @@
 [package]
 name = "module-perpetualasset"
+description = 'FRAME pallet for pricing perpetual assets.'
 version = "0.1.1"
 authors = ["Georges Dib <georges.dib@gmail.com>"]
 edition = "2018"
+readme = 'README.md'
+homepage = 'https://substrate.dev' # Amend that to have my home page
+license = 'Unlicense' # Amend that with the right license
+repository = 'https://github.com/georgesdib/perpetuals/'
 
 [dependencies]
 serde = { version = "1.0.124", optional = true }
