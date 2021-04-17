@@ -21,7 +21,7 @@
 use super::*;
 use frame_support::{assert_noop, assert_ok};
 use mock::{Event, ExtBuilder, Origin, Runtime, PerpetualAsset, System, Tokens,
-	ALICE, BOB, CHARLIE, GEORGES, KUSD};
+	MockPriceSource,ALICE, BOB, CHARLIE, GEORGES, KUSD};
 
 fn last_event() -> Event {
 	System::events().last().unwrap().event.clone()
@@ -222,7 +222,8 @@ fn liquidate_works() {
 		assert_eq!(PerpetualAsset::balances(&CHARLIE), 50i128);
 		assert_eq!(PerpetualAsset::balances(&GEORGES), -10i128);
 
-		PerpetualAsset::update_margin(&2.into());
+		MockPriceSource::set_price(Some(2u128.into()));
+		PerpetualAsset::update_margin();
 
 		assert_eq!(PerpetualAsset::total_collateral_balance(), 80u128);
 		assert_eq!(PerpetualAsset::margin(&ALICE), 93u128);
@@ -259,7 +260,8 @@ fn liquidate_works_complex_2() {
 	ExtBuilder::default().build().execute_with(|| {
 		System::set_block_number(1);
 		System::reset_events();
-		PerpetualAsset::update_margin(&20u128.into());
+		MockPriceSource::set_price(Some(20u128.into()));
+		PerpetualAsset::update_margin();
 
 		assert_ok!(PerpetualAsset::mint(Origin::signed(ALICE), 100i128, 400i128));
 		assert_ok!(PerpetualAsset::mint(Origin::signed(BOB), -100i128, 400i128));
@@ -277,7 +279,8 @@ fn liquidate_works_complex_2() {
 		assert_eq!(PerpetualAsset::balances(&GEORGES), 100i128);
 
 		// liquidate all of Alice's open interest
-		PerpetualAsset::update_margin(&9u128.into());
+		MockPriceSource::set_price(Some(9u128.into()));
+		PerpetualAsset::update_margin();
 		PerpetualAsset::liquidate();
 		assert_eq!(PerpetualAsset::total_collateral_balance(), 8800u128);
 		assert_eq!(PerpetualAsset::margin(&ALICE), 37u128);
@@ -311,7 +314,8 @@ fn liquidate_works_complex() {
 	ExtBuilder::default().build().execute_with(|| {
 		System::set_block_number(1);
 		System::reset_events();
-		PerpetualAsset::update_margin(&20u128.into());
+		MockPriceSource::set_price(Some(20u128.into()));
+		PerpetualAsset::update_margin();
 
 		assert_ok!(PerpetualAsset::mint(Origin::signed(ALICE), 100i128, 450i128));
 		assert_ok!(PerpetualAsset::mint(Origin::signed(BOB), -100i128, 400i128));
@@ -329,7 +333,8 @@ fn liquidate_works_complex() {
 		assert_eq!(PerpetualAsset::balances(&GEORGES), -10i128);
 
 		// No liquidation
-		PerpetualAsset::update_margin(&19u128.into());
+		MockPriceSource::set_price(Some(19u128.into()));
+		PerpetualAsset::update_margin();
 		PerpetualAsset::liquidate();
 		assert_eq!(PerpetualAsset::inventory(&ALICE), 73i128);
 		assert_eq!(PerpetualAsset::inventory(&BOB), -100i128);
@@ -341,7 +346,8 @@ fn liquidate_works_complex() {
 		assert_eq!(PerpetualAsset::balances(&GEORGES), -10i128);
 
 		// liquidate Alice's open interest only
-		PerpetualAsset::update_margin(&16u128.into());
+		MockPriceSource::set_price(Some(16u128.into()));
+		PerpetualAsset::update_margin();
 		PerpetualAsset::liquidate();
 		assert_eq!(PerpetualAsset::total_collateral_balance(), 1650u128);
 		assert_eq!(PerpetualAsset::margin(&ALICE), 158u128);
@@ -383,7 +389,8 @@ fn update_balances_works() {
 		assert_ok!(PerpetualAsset::mint(Origin::signed(GEORGES), -10i128, 20i128));
 		PerpetualAsset::on_initialize(2);
 
-		PerpetualAsset::update_margin(&2.into());
+		MockPriceSource::set_price(Some(2u128.into()));
+		PerpetualAsset::update_margin();
 
 		assert_eq!(PerpetualAsset::inventory(&ALICE), 73i128);
 		assert_eq!(PerpetualAsset::inventory(&BOB), -100i128);

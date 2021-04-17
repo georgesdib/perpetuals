@@ -25,20 +25,19 @@
 // TODO: allow any sort of payoff
 // TODO: make documentation better
 // TODO: clean up code
-// TODO: get price from oracle
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(clippy::unused_unit)]
 
-use frame_support::pallet_prelude::*;
+use frame_support::{pallet_prelude::*, PalletId};
 use frame_system::pallet_prelude::*;
 
 use orml_traits::{MultiCurrency, MultiCurrencyExtended};
 use primitives::{Amount, Balance, CurrencyId};
-use sp_runtime::{traits::AccountIdConversion, FixedPointNumber, ModuleId};
+use sp_runtime::{traits::AccountIdConversion, FixedPointNumber};
 use sp_arithmetic::Perquintill;
 use sp_std::{convert::TryInto, result};
-use support::Price;
+use support::{Price, PriceProvider};
 
 mod mock;
 mod tests;
@@ -54,7 +53,7 @@ pub mod module {
 		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
 		/// The synthetic's module id, keep all collaterals.
 		#[pallet::constant]
-		type ModuleId: Get<ModuleId>;
+		type PalletId: Get<PalletId>;
 
 		/// The asset to be priced
 		#[pallet::constant]
@@ -74,6 +73,9 @@ pub mod module {
 		/// The native currency to pay in.
 		#[pallet::constant]
 		type NativeCurrencyId: Get<CurrencyId>;
+
+		/// The price provider
+		type PriceSource: PriceProvider<CurrencyId>;
 	}
 
 	#[pallet::error]
@@ -137,8 +139,7 @@ pub mod module {
 	#[pallet::hooks]
 	impl<T: Config> Hooks<T::BlockNumber> for Pallet<T> {
 		fn on_initialize(_n: T::BlockNumber) -> Weight {
-			// TODO: Get price from Oracle
-			Self::update_margin(&1.into());
+			Self::update_margin();
 			Self::liquidate();
 			Self::match_interest();
 			// TODO what the hell is this??
@@ -303,36 +304,39 @@ impl<T: Config> Pallet<T> {
 		}
 	}
 
-	fn update_margin(new_price: &Price) {
-		let p0 = Price0::<T>::get().unwrap_or(*new_price);
-		let multiplier;
-		let delta;
-		if *new_price > p0 {
-			multiplier = 1;
-			delta = *new_price - p0;
-		} else {
-			multiplier = -1;
-			delta = p0 - *new_price;
-		}
-		Price0::<T>::set(Some(*new_price));
-		if !delta.is_zero() {
-			Margin::<T>::translate(|account, margin: Balance| -> Option<Balance> {
-				let inventory = Inventory::<T>::get(account);
-				let mut update_inventory = delta.saturating_mul_int(inventory); //TODO is this a problem if it saturates?
-				update_inventory *= multiplier;
-				// TODO panic if this fails
-				let mut amount = Self::amount_try_from_balance(margin).unwrap();
-				amount += update_inventory;
-				if amount < 0 {
-					amount = 0; // No more margin left, account will be liquidated
-				}
-				Some(Self::balance_try_from_amount_abs(amount).unwrap()) //TODO
-			});
+	fn update_margin() {
+		// TODO: handle no price better
+		if let Some(new_price) = Self::get_price() {
+			let p0 = Price0::<T>::get().unwrap_or(new_price);
+			let multiplier;
+			let delta;
+			if new_price > p0 {
+				multiplier = 1;
+				delta = new_price - p0;
+			} else {
+				multiplier = -1;
+				delta = p0 - new_price;
+			}
+			Price0::<T>::set(Some(new_price));
+			if !delta.is_zero() {
+				Margin::<T>::translate(|account, margin: Balance| -> Option<Balance> {
+					let inventory = Inventory::<T>::get(account);
+					let mut update_inventory = delta.saturating_mul_int(inventory); //TODO is this a problem if it saturates?
+					update_inventory *= multiplier;
+					// TODO panic if this fails
+					let mut amount = Self::amount_try_from_balance(margin).unwrap();
+					amount += update_inventory;
+					if amount < 0 {
+						amount = 0; // No more margin left, account will be liquidated
+					}
+					Some(Self::balance_try_from_amount_abs(amount).unwrap()) //TODO
+				});
+			}
 		}
 	}
 
 	fn account_id() -> T::AccountId {
-		T::ModuleId::get().into_account()
+		T::PalletId::get().into_account()
 	}
 
 	/// Gets the total balance of collateral in NativeCurrency
@@ -348,6 +352,11 @@ impl<T: Config> Pallet<T> {
 	/// Convert the absolute value of `Amount` to `Balance`.
 	fn balance_try_from_amount_abs(a: Amount) -> result::Result<Balance, Error<T>> {
 		TryInto::<Balance>::try_into(a.saturating_abs()).map_err(|_| Error::<T>::AmountConvertFailed)
+	}
+
+	/// Get the price from the Oracle
+	fn get_price() -> Option<Price> {
+		T::PriceSource::get_price(T::CurrencyId::get())
 	}
 }
 

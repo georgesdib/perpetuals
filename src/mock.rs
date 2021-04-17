@@ -24,6 +24,7 @@ use orml_traits::parameter_type_with_key;
 use primitives::TokenSymbol;
 use sp_core::H256;
 use sp_runtime::{testing::Header, traits::IdentityLookup};
+use sp_std::cell::RefCell;
 
 pub type BlockNumber = u64;
 pub type AccountId = u128;
@@ -41,7 +42,7 @@ mod perpetualasset {
 
 parameter_types!(
 	pub const BlockHashCount: BlockNumber = 250;
-	pub const PerpetualAssetModuleId: ModuleId = ModuleId(*b"aca/pasm");
+	pub const PerpetualAssetModuleId: PalletId = PalletId(*b"aca/pasm");
 	pub const NativeCurrencyId: CurrencyId = KUSD;
 	pub const UsedCurrencyId: CurrencyId = DOT;
 	pub const InitialIMDivider: Balance = 5u128;
@@ -71,7 +72,6 @@ impl frame_system::Config for Runtime {
 	type OnKilledAccount = ();
 	type SystemWeightInfo = ();
 	type SS58Prefix = ();
-	// TODO: understand what is this??
 	type OnSetCode = ();
 }
 
@@ -91,14 +91,41 @@ impl orml_tokens::Config for Runtime {
 	type OnDust = ();
 }
 
+thread_local! {
+	static PRICE: RefCell<Option<Price>> = RefCell::new(Some(Price::one()));
+}
+
+pub struct MockPriceSource;
+
+impl MockPriceSource {
+	pub fn set_price(price: Option<Price>) {
+		PRICE.with(|v| *v.borrow_mut() = price);
+	}
+}
+
+impl PriceProvider<CurrencyId> for MockPriceSource {
+	fn get_relative_price(_base: CurrencyId, _quote: CurrencyId) -> Option<Price> {
+		None
+	}
+
+	fn get_price(_currency_id: CurrencyId) -> Option<Price> {
+		PRICE.with(|v| *v.borrow_mut())
+	}
+
+	fn lock_price(_currency_id: CurrencyId) {}
+
+	fn unlock_price(_currency_id: CurrencyId) {}
+}
+
 impl perpetualasset::Config for Runtime {
 	type Event = Event;
-	type ModuleId = PerpetualAssetModuleId;
+	type PalletId = PerpetualAssetModuleId;
 	type Currency = Tokens;
 	type NativeCurrencyId = NativeCurrencyId;
 	type CurrencyId = UsedCurrencyId;
 	type InitialIMDivider = InitialIMDivider;
 	type LiquidationDivider = LiquidationDivider;
+	type PriceSource = MockPriceSource;
 }
 
 type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Runtime>;
