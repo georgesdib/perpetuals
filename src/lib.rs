@@ -143,6 +143,7 @@ pub mod module {
 	#[pallet::hooks]
 	impl<T: Config> Hooks<T::BlockNumber> for Pallet<T> {
 		fn on_initialize(_n: T::BlockNumber) -> Weight {
+			// TODO: this is called multiple times and not just at block start
 			Self::update_margin();
 			Self::liquidate();
 			Self::match_interest();
@@ -150,6 +151,7 @@ pub mod module {
 			10
 		}
 
+		// TODO: this on seems to be called only once
 		fn on_finalize(_n: T::BlockNumber) {}
 	}
 	
@@ -160,56 +162,77 @@ pub mod module {
 		/// - `origin`: the calling account
 		/// - `amount`: the amount of asset to be minted(can be positive or negative)
 		/// - `collateral`: the amount of collateral in native currency
-		pub(super) fn mint(
+		pub(super) fn mint_or_burn(
 			origin: OriginFor<T>,
-			amount: Amount,
-			collateral: Amount,
+			amount: Balance,
+			positive_amount: bool,
+			collateral: Balance,
+			positive_collateral: bool,
 		) -> DispatchResultWithPostInfo {
-			let who = ensure_signed(origin)?;
+			let mut amt = Self::amount_try_from_balance(amount)?;
+			let mut col = Self::amount_try_from_balance(collateral)?;
 
-			let current_balance = Balances::<T>::try_get(who.clone()).unwrap_or(0.into());
-			let balance = current_balance.checked_add(amount).ok_or(Error::<T>::Overflow)?;
-			let positive_collateral = Self::balance_try_from_amount_abs(collateral)?;
-
-			// Check if enough collateral
-			let current_margin = Self::amount_try_from_balance(Margin::<T>::try_get(who.clone()).unwrap_or(0u128.into()))?;
-			let price = Price0::<T>::get().ok_or(Error::<T>::PriceNotSet)?;
-			let positive_balance = Self::balance_try_from_amount_abs(balance)?;
-			let total_price = price.checked_mul_int(positive_balance).ok_or(Error::<T>::Overflow)?;
-			let needed_im = Self::amount_try_from_balance(total_price / T::InitialIMDivider::get())?;
-			let new_margin = current_margin.checked_add(collateral).ok_or(Error::<T>::Overflow)?;
-			if new_margin < needed_im {
-				return Err(Error::<T>::NotEnoughIM.into());
+			if !positive_amount {
+				amt *= -1;
 			}
 
-			let module_account = Self::account_id();
-			let positive_margin = Self::balance_try_from_amount_abs(new_margin)?;
-
-			if collateral > 0 {
-				// Transfer the collateral to the module's account
-				T::Currency::transfer(T::NativeCurrencyId::get(), &who, &module_account, positive_collateral)?;
+			if !positive_collateral {
+				col *= -1;
 			}
 
-			if collateral < 0 {
-				// Transfer the collateral from the module's account
-				T::Currency::transfer(T::NativeCurrencyId::get(), &module_account, &who, positive_collateral)?;
-			}
-
-			if collateral != 0 {
-				Margin::<T>::insert(who.clone(), positive_margin);
-				Self::deposit_event(Event::CollateralUpdated(collateral));
-			}
-
-			// Update the balances
-			Balances::<T>::insert(who.clone(), balance);
-			Self::deposit_event(Event::BalanceUpdated(who, balance));
-
-			Ok(().into())
+			Self::mint(origin, amt, col)
 		}
 	}
 }
 
 impl<T: Config> Pallet<T> {
+	fn mint(
+		origin: OriginFor<T>,
+		amount: Amount,
+		collateral: Amount,
+	) -> DispatchResultWithPostInfo {
+		let who = ensure_signed(origin)?;
+
+		let current_balance = Balances::<T>::try_get(who.clone()).unwrap_or(0.into());
+		let balance = current_balance.checked_add(amount).ok_or(Error::<T>::Overflow)?;
+		let positive_collateral = Self::balance_try_from_amount_abs(collateral)?;
+
+		// Check if enough collateral
+		let current_margin = Self::amount_try_from_balance(Margin::<T>::try_get(who.clone()).unwrap_or(0u128.into()))?;
+		let price = Price0::<T>::get().ok_or(Error::<T>::PriceNotSet)?;
+		let positive_balance = Self::balance_try_from_amount_abs(balance)?;
+		let total_price = price.checked_mul_int(positive_balance).ok_or(Error::<T>::Overflow)?;
+		let needed_im = Self::amount_try_from_balance(total_price / T::InitialIMDivider::get())?;
+		let new_margin = current_margin.checked_add(collateral).ok_or(Error::<T>::Overflow)?;
+		if new_margin < needed_im {
+			return Err(Error::<T>::NotEnoughIM.into());
+		}
+
+		let module_account = Self::account_id();
+		let positive_margin = Self::balance_try_from_amount_abs(new_margin)?;
+
+		if collateral > 0 {
+			// Transfer the collateral to the module's account
+			T::Currency::transfer(T::NativeCurrencyId::get(), &who, &module_account, positive_collateral)?;
+		}
+
+		if collateral < 0 {
+			// Transfer the collateral from the module's account
+			T::Currency::transfer(T::NativeCurrencyId::get(), &module_account, &who, positive_collateral)?;
+		}
+
+		if collateral != 0 {
+			Margin::<T>::insert(who.clone(), positive_margin);
+			Self::deposit_event(Event::CollateralUpdated(collateral));
+		}
+
+		// Update the balances
+		Balances::<T>::insert(who.clone(), balance);
+		Self::deposit_event(Event::BalanceUpdated(who, balance));
+
+		Ok(().into())
+	}
+
 	/// Call *M* the total margin for a participant *A*,
 	/// Call *T* the total interest, and *B* the inventory (open interest is $T - B$)
 	/// The needed collateral for maintaining the inventory is $B * P_0 * L$
@@ -363,6 +386,7 @@ impl<T: Config> Pallet<T> {
 
 	/// Get the price from the Oracle
 	fn get_price() -> Option<Price> {
+		// TODO: amend maybe to check relative price to native
 		T::PriceSource::get_price(T::CurrencyId::get())
 	}
 }
