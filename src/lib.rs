@@ -25,6 +25,10 @@
 // TODO: allow any sort of payoff
 // TODO: make documentation better
 // TODO: clean up code
+// TODO: check collateral redeeming cases, for now if pool is at a loss
+//       there is a race, and the first person to claim collateral takes
+//       more than the others (the others may end up with 0!)
+// TODO: Should I clean 0 balances to clear up storage?
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(clippy::unused_unit)]
@@ -209,7 +213,7 @@ impl<T: Config> Pallet<T> {
 	/// Call *M* the total margin for a participant *A*,
 	/// Call *T* the total interest, and *B* the inventory (open interest is $T - B$)
 	/// The needed collateral for maintaining the inventory is $B * P_0 * L$
-	/// If $B * P_0 * L > M$, then liquididate the inventory as per below.
+	/// If $B * P_0 * L >= M$, then liquididate the inventory as per below.
 	/// If $B * P_0 * L < M$, but $T * P_0 * L > M$ then close out part of the total interest such that:
 	/// $$
 	/// I * P_0 * T' = M \\
@@ -224,40 +228,43 @@ impl<T: Config> Pallet<T> {
 	/// it does not suffer from immediate liquidation.
 	/// 
 	/// ### Liquidation of inventory
-	/// If $B * P_0 * L > M$, liquidate the full position
+	/// If $B * P_0 * L >= M$, liquidate the full position
 	/// so total position and inventory goes to $0$
 	fn liquidate() {
-		let price = Price0::<T>::get().unwrap(); // Price was already set so never panics
-		let liq_div = T::LiquidationDivider::get();
-		let im_div = T::InitialIMDivider::get();
+		let price = Price0::<T>::get();
+		if price.is_some() {
+			let price = price.unwrap();
+			let liq_div = T::LiquidationDivider::get();
+			let im_div = T::InitialIMDivider::get();
 
-		for (account, margin) in Margin::<T>::iter() {
-			let inventory_signed = Self::inventory(account.clone());
-			let inventory = Self::balance_try_from_amount_abs(inventory_signed).unwrap(); // TODO handle overflow better
-			let balance = Self::balance_try_from_amount_abs(
-				Balances::<T>::get(account.clone())).unwrap(); // TODO handle overflow better
+			for (account, margin) in Margin::<T>::iter() {
+				let inventory_signed = Self::inventory(account.clone());
+				let inventory = Self::balance_try_from_amount_abs(inventory_signed).unwrap(); // TODO handle overflow better
+				let balance = Self::balance_try_from_amount_abs(
+					Balances::<T>::get(account.clone())).unwrap(); // TODO handle overflow better
 
-			// am I in liquidation? TODO check those saturating multiplications
-			// TODO: make sure no division by 0, but that should be obvious, maybe check at genesis
-			if (price.saturating_mul_int(inventory) / liq_div) > margin { // Yes I am
-				Balances::<T>::insert(account.clone(), 0);
-				Inventory::<T>::insert(account, 0);
-			} else if (price.saturating_mul_int(balance) / liq_div) > margin {
-				if (price.saturating_mul_int(inventory) / im_div) > margin {
-					Balances::<T>::insert(account, inventory_signed);
-				} else {
-					let mut new_balance = margin.saturating_mul(im_div);
-					let inv_price = price.reciprocal().unwrap(); // TODO check if price is not 0
-					new_balance = inv_price.saturating_mul_int(new_balance);
-					// TODO: handle overflow better
-					let mut n = Self::amount_try_from_balance(new_balance).unwrap();
-					if inventory_signed < 0 {
-						n *= -1;
+				// am I in liquidation? TODO check those saturating multiplications
+				// TODO: make sure no division by 0, but that should be obvious, maybe check at genesis
+				if (price.saturating_mul_int(inventory) / liq_div) >= margin { // Yes I am
+					Balances::<T>::insert(account.clone(), 0);
+					Inventory::<T>::insert(account, 0);
+				} else if (price.saturating_mul_int(balance) / liq_div) > margin {
+					if price.is_zero() || (price.saturating_mul_int(inventory) / im_div) > margin {
+						Balances::<T>::insert(account, inventory_signed);
+					} else {
+						let mut new_balance = margin.saturating_mul(im_div);
+						let inv_price = price.reciprocal().unwrap();
+						new_balance = inv_price.saturating_mul_int(new_balance);
+						// TODO: handle overflow better
+						let mut n = Self::amount_try_from_balance(new_balance).unwrap();
+						if inventory_signed < 0 {
+							n *= -1;
+						}
+						Balances::<T>::insert(account, n);
 					}
-					Balances::<T>::insert(account, n);
-				}
-			} // Nothing to do in this case	
-		}
+				} // Nothing to do in this case	
+			}
+		} // Price not set, do nothing
 	}
 
 	/// If $\forall i, X_i = 0$ then no interest to match. Otherwise, call $R = \frac{\sum_i Y_i}{\sum_i X_i}$
@@ -269,7 +276,7 @@ impl<T: Config> Pallet<T> {
 		let mut shorts: Balance = 0u128;
 		let mut longs: Balance = 0u128;
 		for balance in Balances::<T>::iter_values() {
-			let b = Self::balance_try_from_amount_abs(balance).unwrap(); // Panics if error
+			let b = Self::balance_try_from_amount_abs(balance).unwrap(); // TODO Panics if error
 			if balance < 0 {
 				shorts += b;
 			} else {
@@ -293,7 +300,7 @@ impl<T: Config> Pallet<T> {
 				if (balance < 0 && shorts_filled) || (balance >= 0 && !shorts_filled) {
 					amount = balance;
 				} else {
-					let b = Self::balance_try_from_amount_abs(balance).unwrap(); // Panics if error
+					let b = Self::balance_try_from_amount_abs(balance).unwrap(); // TODO Panics if error
 					amount = Self::amount_try_from_balance(ratio.mul_floor(b)).unwrap(); // Should never fail given we know no overflow
 					if balance < 0 {
 						amount *= -1;
@@ -327,7 +334,7 @@ impl<T: Config> Pallet<T> {
 					let mut amount = Self::amount_try_from_balance(margin).unwrap();
 					amount += update_inventory;
 					if amount < 0 {
-						amount = 0; // No more margin left, account will be liquidated
+						amount = 0; // No more margin left, account will be liquidated, TODO: update margin for everyone
 					}
 					Some(Self::balance_try_from_amount_abs(amount).unwrap()) //TODO
 				});
