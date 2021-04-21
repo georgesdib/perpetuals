@@ -29,6 +29,8 @@
 //       there is a race, and the first person to claim collateral takes
 //       more than the others (the others may end up with 0!)
 // TODO: Should I clean 0 balances to clear up storage?
+// TODO: replace saturating_mul_int by something better as you really need
+// 		 a price return type instead
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(clippy::unused_unit)]
@@ -38,7 +40,7 @@ use frame_system::pallet_prelude::*;
 
 use orml_traits::{MultiCurrency, MultiCurrencyExtended};
 use primitives::{Amount, Balance, CurrencyId};
-use sp_runtime::{traits::AccountIdConversion, FixedPointNumber};
+use sp_runtime::{traits::AccountIdConversion, Permill, FixedPointNumber};
 use sp_arithmetic::Perquintill;
 use sp_std::{convert::TryInto, result};
 use support::{Price, PriceProvider};
@@ -65,11 +67,11 @@ pub mod module {
 
 		/// Initial IM Divider
 		#[pallet::constant]
-		type InitialIMDivider: Get<Balance>;
+		type InitialIMDivider: Get<Permill>;
 
 		/// Liquidation Divider
 		#[pallet::constant]
-		type LiquidationDivider: Get<Balance>;
+		type LiquidationDivider: Get<Permill>;
 
 		/// Currency for transfer currencies
 		type Currency: MultiCurrencyExtended<Self::AccountId, CurrencyId = CurrencyId, Balance = Balance>;
@@ -202,7 +204,8 @@ impl<T: Config> Pallet<T> {
 		let price = Price0::<T>::get().ok_or(Error::<T>::PriceNotSet)?;
 		let positive_balance = Self::balance_try_from_amount_abs(balance)?;
 		let total_price = price.checked_mul_int(positive_balance).ok_or(Error::<T>::Overflow)?;
-		let needed_im = Self::amount_try_from_balance(total_price / T::InitialIMDivider::get())?;
+		let needed_im = Self::amount_try_from_balance(
+			T::InitialIMDivider::get().mul_ceil(total_price))?;
 		let new_margin = current_margin.checked_add(collateral).ok_or(Error::<T>::Overflow)?;
 		if new_margin < needed_im {
 			return Err(Error::<T>::NotEnoughIM.into());
@@ -267,17 +270,17 @@ impl<T: Config> Pallet<T> {
 					Balances::<T>::get(account.clone())).unwrap(); // TODO handle overflow better
 
 				// am I in liquidation? TODO check those saturating multiplications
-				// TODO: make sure no division by 0, but that should be obvious, maybe check at genesis
-				if (price.saturating_mul_int(inventory) / liq_div) >= margin { // Yes I am
+				if liq_div.mul_ceil(price.saturating_mul_int(inventory)) >= margin { // Yes I am
 					Balances::<T>::insert(account.clone(), 0);
 					Inventory::<T>::insert(account, 0);
-				} else if (price.saturating_mul_int(balance) / liq_div) > margin {
-					if price.is_zero() || (price.saturating_mul_int(inventory) / im_div) > margin {
+				} else if liq_div.mul_ceil(price.saturating_mul_int(balance)) > margin {
+					if price.is_zero() || im_div.mul_ceil(price.saturating_mul_int(inventory)) > margin {
 						Balances::<T>::insert(account, inventory_signed);
 					} else {
-						let mut new_balance = margin.saturating_mul(im_div);
-						let inv_price = price.reciprocal().unwrap();
-						new_balance = inv_price.saturating_mul_int(new_balance);
+						// TODO is this safe?
+						let new_balance = price.reciprocal().unwrap().saturating_mul_int(
+							im_div.saturating_reciprocal_mul_floor(margin)
+						);
 						// TODO: handle overflow better
 						let mut n = Self::amount_try_from_balance(new_balance).unwrap();
 						if inventory_signed < 0 {
@@ -351,11 +354,9 @@ impl<T: Config> Pallet<T> {
 			if !delta.is_zero() {
 				Margin::<T>::translate(|account, margin: Balance| -> Option<Balance> {
 					let inventory = Inventory::<T>::get(account);
-					let mut update_inventory = delta.saturating_mul_int(inventory); //TODO is this a problem if it saturates?
-					update_inventory *= multiplier;
+					let update_inventory = delta.saturating_mul_int(inventory) * multiplier; //TODO is this a problem if it saturates?
 					// TODO panic if this fails
-					let mut amount = Self::amount_try_from_balance(margin).unwrap();
-					amount += update_inventory;
+					let mut amount = Self::amount_try_from_balance(margin).unwrap() + update_inventory;
 					if amount < 0 {
 						amount = 0; // No more margin left, account will be liquidated, TODO: update margin for everyone
 					}

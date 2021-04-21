@@ -45,8 +45,8 @@ parameter_types!(
 	pub const PerpetualAssetModuleId: PalletId = PalletId(*b"aca/pasm");
 	pub const NativeCurrencyId: CurrencyId = KUSD;
 	pub const UsedCurrencyId: CurrencyId = DOT;
-	pub const InitialIMDivider: Balance = 5u128;
-	pub const LiquidationDivider: Balance = 10u128;
+	pub const InitialIMDivider: Permill = Permill::from_percent(20);
+	pub const LiquidationDivider: Permill = Permill::from_percent(10);
 );
 
 impl frame_system::Config for Runtime {
