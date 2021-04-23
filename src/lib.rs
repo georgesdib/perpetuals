@@ -29,8 +29,6 @@
 //       there is a race, and the first person to claim collateral takes
 //       more than the others (the others may end up with 0!)
 // TODO: Should I clean 0 balances to clear up storage?
-// TODO: replace saturating_mul_int by something better as you really need
-// 		 a price return type instead
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(clippy::unused_unit)]
@@ -149,7 +147,7 @@ pub mod module {
 			Self::update_margin();
 			Self::liquidate();
 			Self::match_interest();
-			// TODO what the hell is this??
+			// TODO check this
 			10
 		}
 
