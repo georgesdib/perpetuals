@@ -23,7 +23,7 @@ use frame_support::{construct_runtime, pallet_prelude::GenesisBuild, parameter_t
 use orml_traits::parameter_type_with_key;
 use primitives::TokenSymbol;
 use sp_core::H256;
-use sp_runtime::{testing::Header, traits::IdentityLookup};
+use sp_runtime::{testing::Header, traits::{IdentityLookup, One}};
 use sp_std::cell::RefCell;
 
 pub type BlockNumber = u64;

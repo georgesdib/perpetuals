@@ -40,7 +40,7 @@ use frame_system::pallet_prelude::*;
 
 use orml_traits::{MultiCurrency, MultiCurrencyExtended};
 use primitives::{Amount, Balance, CurrencyId};
-use sp_runtime::{traits::AccountIdConversion, Permill, FixedPointNumber};
+use sp_runtime::{traits::{AccountIdConversion, Zero}, Permill, FixedPointNumber};
 use sp_arithmetic::Perquintill;
 use sp_std::{convert::TryInto, result};
 use support::{Price, PriceProvider};
