@@ -45,8 +45,9 @@ parameter_types!(
 	pub const PerpetualAssetModuleId: PalletId = PalletId(*b"aca/pasm");
 	pub const NativeCurrencyId: CurrencyId = KUSD;
 	pub const UsedCurrencyId: CurrencyId = DOT;
-	pub const InitialIMDivider: Permill = Permill::from_percent(20);
-	pub const LiquidationDivider: Permill = Permill::from_percent(10);
+	pub const InitialIMRatio: Permill = Permill::from_percent(20);
+	pub const LiquidationRatio: Permill = Permill::from_percent(10);
+	pub const TransactionFee: Permill = Permill::from_parts(3000);
 );
 
 impl frame_system::Config for Runtime {
@@ -105,11 +106,11 @@ impl MockPriceSource {
 
 impl PriceProvider<CurrencyId> for MockPriceSource {
 	fn get_relative_price(_base: CurrencyId, _quote: CurrencyId) -> Option<Price> {
-		None
+		PRICE.with(|v| *v.borrow_mut())
 	}
 
 	fn get_price(_currency_id: CurrencyId) -> Option<Price> {
-		PRICE.with(|v| *v.borrow_mut())
+		None
 	}
 
 	fn lock_price(_currency_id: CurrencyId) {}
@@ -123,8 +124,9 @@ impl perpetualasset::Config for Runtime {
 	type Currency = Tokens;
 	type NativeCurrencyId = NativeCurrencyId;
 	type CurrencyId = UsedCurrencyId;
-	type InitialIMDivider = InitialIMDivider;
-	type LiquidationDivider = LiquidationDivider;
+	type InitialIMRatio = InitialIMRatio;
+	type LiquidationRatio = LiquidationRatio;
+	type TransactionFee = TransactionFee;
 	type PriceSource = MockPriceSource;
 }
 

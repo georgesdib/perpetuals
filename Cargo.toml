@@ -22,6 +22,7 @@ orml-tokens = { git = "https://github.com/open-web3-stack/open-runtime-module-li
 support = { package = "module-support", git = "https://github.com/AcalaNetwork/Acala", default-features = false }
 primitives = { package = "acala-primitives", git = "https://github.com/AcalaNetwork/Acala", default-features = false }
 module-prices = { package = "module-prices", git = "https://github.com/AcalaNetwork/Acala", default-features = false }
+pallet-treasury = { git = "https://github.com/paritytech/substrate", branch = "rococo-v1", default-features = false }
 
 [dev-dependencies]
 sp-core = { git = "https://github.com/paritytech/substrate", branch = "rococo-v1", default-features = false }

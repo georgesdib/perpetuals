@@ -29,16 +29,18 @@
 //       there is a race, and the first person to claim collateral takes
 //       more than the others (the others may end up with 0!)
 // TODO: Should I clean 0 balances to clear up storage?
+// TODO: move liquidation and all this to offchain worker
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(clippy::unused_unit)]
 
-use frame_support::{pallet_prelude::*, PalletId};
+use frame_support::{pallet_prelude::*, PalletId, transactional,
+	traits::{OnUnbalanced, Currency, ReservableCurrency}};
 use frame_system::pallet_prelude::*;
 
 use orml_traits::{MultiCurrency, MultiCurrencyExtended};
 use primitives::{Amount, Balance, CurrencyId};
-use sp_runtime::{traits::{AccountIdConversion, Zero}, Permill, FixedPointNumber};
+use sp_runtime::{traits::{AccountIdConversion}, Permill, FixedPointNumber};
 use sp_arithmetic::Perquintill;
 use sp_std::{convert::TryInto, result};
 use support::{Price, PriceProvider};
@@ -47,6 +49,9 @@ mod mock;
 mod tests;
 
 pub use module::*;
+
+type NegativeImbalanceOf<T> =
+	<<T as Config>::FeeCurrency as Currency<<T as frame_system::Config>::AccountId>>::NegativeImbalance;
 
 #[frame_support::pallet]
 pub mod module {
@@ -63,16 +68,23 @@ pub mod module {
 		#[pallet::constant]
 		type CurrencyId: Get<CurrencyId>;
 
-		/// Initial IM Divider
+		/// Initial IM Ratio
 		#[pallet::constant]
-		type InitialIMDivider: Get<Permill>;
+		type InitialIMRatio: Get<Permill>;
 
-		/// Liquidation Divider
+		/// Liquidation Ratio
 		#[pallet::constant]
-		type LiquidationDivider: Get<Permill>;
+		type LiquidationRatio: Get<Permill>;
+
+		/// Transaction fee
+		#[pallet::constant]
+		type TransactionFee: Get<Permill>;
 
 		/// Currency for transfer currencies
 		type Currency: MultiCurrencyExtended<Self::AccountId, CurrencyId = CurrencyId, Balance = Balance>;
+
+		/// The currency type in which fees will be paid.
+		type FeeCurrency: Currency<Self::AccountId> + ReservableCurrency<Self::AccountId>;
 
 		/// The native currency to pay in.
 		#[pallet::constant]
@@ -80,6 +92,9 @@ pub mod module {
 
 		/// The price provider
 		type PriceSource: PriceProvider<CurrencyId>;
+
+		/// The treasury for funds
+		type Treasury: OnUnbalanced<NegativeImbalanceOf<Self>>;
 	}
 
 	#[pallet::error]
@@ -94,8 +109,6 @@ pub mod module {
 		NotEnoughBalance,
 		/// Emitted when P0 not set
 		PriceNotSet,
-		/// Emitted when claiming the wrong sign, ie buy vs sell
-		WrongSign,
 	}
 
 	#[pallet::event]
@@ -158,15 +171,16 @@ pub mod module {
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
 		#[pallet::weight(1000)]
+		#[transactional]
 		/// Mints the payoff
 		/// - `origin`: the calling account
 		/// - `amount`: the amount of asset to be minted(can be positive or negative)
 		/// - `collateral`: the amount of collateral in native currency
 		pub(super) fn mint_or_burn(
 			origin: OriginFor<T>,
-			amount: Balance,
+			#[pallet::compact] amount: Balance,
 			positive_amount: bool,
-			collateral: Balance,
+			#[pallet::compact] collateral: Balance,
 			positive_collateral: bool,
 		) -> DispatchResultWithPostInfo {
 			let mut amt = Self::amount_try_from_balance(amount)?;
@@ -195,31 +209,47 @@ impl<T: Config> Pallet<T> {
 
 		let current_balance = Balances::<T>::try_get(who.clone()).unwrap_or(0.into());
 		let balance = current_balance.checked_add(amount).ok_or(Error::<T>::Overflow)?;
-		let positive_collateral = Self::balance_try_from_amount_abs(collateral)?;
 
 		// Check if enough collateral
 		let current_margin = Self::amount_try_from_balance(Margin::<T>::try_get(who.clone()).unwrap_or(0u128.into()))?;
 		let price = Price0::<T>::get().ok_or(Error::<T>::PriceNotSet)?;
 		let positive_balance = Self::balance_try_from_amount_abs(balance)?;
 		let total_price = price.checked_mul_int(positive_balance).ok_or(Error::<T>::Overflow)?;
+		//TODO: very ugly
+		let pos_amount = Self::balance_try_from_amount_abs(amount)?;
+		let fee = price.checked_mul_int(pos_amount)
+				.and_then(|res| Some(T::TransactionFee::get().mul_ceil(res)))
+				.ok_or(Error::<T>::Overflow)?;
+		let f = Self::amount_try_from_balance(fee)?;
 		let needed_im = Self::amount_try_from_balance(
-			T::InitialIMDivider::get().mul_ceil(total_price))?;
-		let new_margin = current_margin.checked_add(collateral).ok_or(Error::<T>::Overflow)?;
+			T::InitialIMRatio::get().mul_ceil(total_price))?;
+		let new_margin = current_margin.checked_add(collateral)
+				.and_then(|res| res.checked_sub(f))		
+				.ok_or(Error::<T>::Overflow)?;
 		if new_margin < needed_im {
 			return Err(Error::<T>::NotEnoughIM.into());
 		}
 
 		let module_account = Self::account_id();
 		let positive_margin = Self::balance_try_from_amount_abs(new_margin)?;
+		let positive_collateral = Self::balance_try_from_amount_abs(collateral)?;
 
 		if collateral > 0 {
 			// Transfer the collateral to the module's account
-			T::Currency::transfer(T::NativeCurrencyId::get(), &who, &module_account, positive_collateral)?;
+			<T::Currency as MultiCurrency<T::AccountId>>::transfer(
+				T::NativeCurrencyId::get(),
+				&who,
+				&module_account,
+				positive_collateral)?;
 		}
 
 		if collateral < 0 {
 			// Transfer the collateral from the module's account
-			T::Currency::transfer(T::NativeCurrencyId::get(), &module_account, &who, positive_collateral)?;
+			<T::Currency as MultiCurrency<T::AccountId>>::transfer(
+				T::NativeCurrencyId::get(),
+				&module_account,
+				&who,
+				positive_collateral)?;
 		}
 
 		if collateral != 0 {
@@ -258,8 +288,8 @@ impl<T: Config> Pallet<T> {
 		let price = Price0::<T>::get();
 		if price.is_some() {
 			let price = price.unwrap();
-			let liq_div = T::LiquidationDivider::get();
-			let im_div = T::InitialIMDivider::get();
+			let liq_div = T::LiquidationRatio::get();
+			let im_div = T::InitialIMRatio::get();
 
 			for (account, margin) in Margin::<T>::iter() {
 				let inventory_signed = Self::inventory(account.clone());
@@ -295,6 +325,7 @@ impl<T: Config> Pallet<T> {
 	/// $B_i$ has bought $min(X_i, X_i * R)$
 	/// $S_i$ has sold $min(Y_i, Y_i / R)$
 	fn match_interest() {
+		// TODO: only run if needed
 		// Reset inventory
 		Inventory::<T>::remove_all();
 		let mut shorts: Balance = 0u128;
@@ -370,7 +401,7 @@ impl<T: Config> Pallet<T> {
 
 	/// Gets the total balance of collateral in NativeCurrency
 	pub fn total_collateral_balance() -> Balance {
-		T::Currency::total_balance(T::NativeCurrencyId::get(), &Self::account_id())
+		<T::Currency as MultiCurrency<T::AccountId>>::total_balance(T::NativeCurrencyId::get(), &Self::account_id())
 	}
 
 	/// Convert `Balance` to `Amount`.
@@ -385,8 +416,7 @@ impl<T: Config> Pallet<T> {
 
 	/// Get the price from the Oracle
 	fn get_price() -> Option<Price> {
-		// TODO: amend maybe to check relative price to native
-		T::PriceSource::get_price(T::CurrencyId::get())
+		T::PriceSource::get_relative_price(T::NativeCurrencyId::get(), T::CurrencyId::get())
 	}
 }
 

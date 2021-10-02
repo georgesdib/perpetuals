@@ -34,11 +34,11 @@ fn top_up_collateral_works() {
 		System::reset_events();
 		PerpetualAsset::on_initialize(1);
 
-		assert_ok!(PerpetualAsset::mint(Origin::signed(ALICE), 100i128, 20i128));
+		assert_ok!(PerpetualAsset::mint(Origin::signed(ALICE), 100i128, 21i128));
 
 		assert_ok!(PerpetualAsset::mint(Origin::signed(ALICE), 0i128, 10i128));
 
-		assert_eq!(PerpetualAsset::total_collateral_balance(), 30u128);
+		assert_eq!(PerpetualAsset::total_collateral_balance(), 31u128);
 		assert_eq!(PerpetualAsset::margin(&ALICE), 30u128);
 
 		assert_noop!(
@@ -50,7 +50,7 @@ fn top_up_collateral_works() {
 			orml_tokens::Error::<Runtime>::BalanceTooLow,
 		);
 
-		assert_eq!(PerpetualAsset::total_collateral_balance(), 30u128);
+		assert_eq!(PerpetualAsset::total_collateral_balance(), 31u128);
 		assert_eq!(PerpetualAsset::margin(&ALICE), 30u128);
 	});
 }

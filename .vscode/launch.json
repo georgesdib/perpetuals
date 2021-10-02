@@ -7,6 +7,21 @@
         {
             "type": "lldb",
             "request": "launch",
+            "name": "Debug unit test top_up_collateral_works",
+            "cargo": {
+                "args": [
+                    "test",
+                    "top_up_collateral_works",
+                    "--no-run",
+                    "--lib"
+                ]
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
             "name": "Debug unit tests in library 'module-perpetualasset'",
             "cargo": {
                 "args": [
